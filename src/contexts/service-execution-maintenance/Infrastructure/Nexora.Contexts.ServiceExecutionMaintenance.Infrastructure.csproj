@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Domain\Nexora.Contexts.ServiceExecutionMaintenance.Domain.csproj" />
+    <ProjectReference Include="..\..\..\shared\Nexora.Shared.Domain\Nexora.Shared.Domain.csproj" />
+    <ProjectReference Include="..\..\..\shared\Nexora.Shared.Infrastructure\Nexora.Shared.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
