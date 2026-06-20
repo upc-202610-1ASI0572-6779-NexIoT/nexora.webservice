@@ -1,0 +1,37 @@
+<Solution>
+  <Project Path="src/host/Nexora.WebApi/Nexora.WebApi.csproj" />
+  
+  <!-- Shared Projects -->
+  <Project Path="src/shared/Nexora.Shared.Domain/Nexora.Shared.Domain.csproj" />
+  <Project Path="src/shared/Nexora.Shared.Infrastructure/Nexora.Shared.Infrastructure.csproj" />
+
+  <!-- Identity & Access Management -->
+  <Project Path="src/contexts/identity-access-management/Domain/Nexora.Contexts.IdentityAccessManagement.Domain.csproj" />
+  <Project Path="src/contexts/identity-access-management/Application/Nexora.Contexts.IdentityAccessManagement.Application.csproj" />
+  <Project Path="src/contexts/identity-access-management/Infrastructure/Nexora.Contexts.IdentityAccessManagement.Infrastructure.csproj" />
+  <Project Path="src/contexts/identity-access-management/Presentation/Nexora.Contexts.IdentityAccessManagement.Presentation.csproj" />
+  
+  <!-- Resource & Asset Management -->
+  <Project Path="src/contexts/resource-asset-management/Domain/Nexora.Contexts.ResourceAssetManagement.Domain.csproj" />
+  <Project Path="src/contexts/resource-asset-management/Application/Nexora.Contexts.ResourceAssetManagement.Application.csproj" />
+  <Project Path="src/contexts/resource-asset-management/Infrastructure/Nexora.Contexts.ResourceAssetManagement.Infrastructure.csproj" />
+  <Project Path="src/contexts/resource-asset-management/Presentation/Nexora.Contexts.ResourceAssetManagement.Presentation.csproj" />
+  
+  <!-- Service Monitoring & Intelligence -->
+  <Project Path="src/contexts/service-monitoring-intelligence/Domain/Nexora.Contexts.ServiceMonitoringIntelligence.Domain.csproj" />
+  <Project Path="src/contexts/service-monitoring-intelligence/Application/Nexora.Contexts.ServiceMonitoringIntelligence.Application.csproj" />
+  <Project Path="src/contexts/service-monitoring-intelligence/Infrastructure/Nexora.Contexts.ServiceMonitoringIntelligence.Infrastructure.csproj" />
+  <Project Path="src/contexts/service-monitoring-intelligence/Presentation/Nexora.Contexts.ServiceMonitoringIntelligence.Presentation.csproj" />
+  
+  <!-- Service Execution & Maintenance -->
+  <Project Path="src/contexts/service-execution-maintenance/Domain/Nexora.Contexts.ServiceExecutionMaintenance.Domain.csproj" />
+  <Project Path="src/contexts/service-execution-maintenance/Application/Nexora.Contexts.ServiceExecutionMaintenance.Application.csproj" />
+  <Project Path="src/contexts/service-execution-maintenance/Infrastructure/Nexora.Contexts.ServiceExecutionMaintenance.Infrastructure.csproj" />
+  <Project Path="src/contexts/service-execution-maintenance/Presentation/Nexora.Contexts.ServiceExecutionMaintenance.Presentation.csproj" />
+  
+  <!-- Subscriptions & Payment Management -->
+  <Project Path="src/contexts/subscriptions-payment-management/Domain/Nexora.Contexts.SubscriptionsPaymentManagement.Domain.csproj" />
+  <Project Path="src/contexts/subscriptions-payment-management/Application/Nexora.Contexts.SubscriptionsPaymentManagement.Application.csproj" />
+  <Project Path="src/contexts/subscriptions-payment-management/Infrastructure/Nexora.Contexts.SubscriptionsPaymentManagement.Infrastructure.csproj" />
+  <Project Path="src/contexts/subscriptions-payment-management/Presentation/Nexora.Contexts.SubscriptionsPaymentManagement.Presentation.csproj" />
+</Solution>

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\shared\Nexora.Shared.Domain\Nexora.Shared.Domain.csproj" />
+    <ProjectReference Include="..\..\shared\Nexora.Shared.Infrastructure\Nexora.Shared.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\contexts\identity-access-management\Application\Nexora.Contexts.IdentityAccessManagement.Application.csproj" />
+    <ProjectReference Include="..\..\contexts\identity-access-management\Infrastructure\Nexora.Contexts.IdentityAccessManagement.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\contexts\identity-access-management\Presentation\Nexora.Contexts.IdentityAccessManagement.Presentation.csproj" />
+    <ProjectReference Include="..\..\contexts\resource-asset-management\Application\Nexora.Contexts.ResourceAssetManagement.Application.csproj" />
+    <ProjectReference Include="..\..\contexts\resource-asset-management\Infrastructure\Nexora.Contexts.ResourceAssetManagement.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\contexts\resource-asset-management\Presentation\Nexora.Contexts.ResourceAssetManagement.Presentation.csproj" />
+    <ProjectReference Include="..\..\contexts\service-monitoring-intelligence\Application\Nexora.Contexts.ServiceMonitoringIntelligence.Application.csproj" />
+    <ProjectReference Include="..\..\contexts\service-monitoring-intelligence\Infrastructure\Nexora.Contexts.ServiceMonitoringIntelligence.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\contexts\service-monitoring-intelligence\Presentation\Nexora.Contexts.ServiceMonitoringIntelligence.Presentation.csproj" />
+    <ProjectReference Include="..\..\contexts\service-execution-maintenance\Application\Nexora.Contexts.ServiceExecutionMaintenance.Application.csproj" />
+    <ProjectReference Include="..\..\contexts\service-execution-maintenance\Infrastructure\Nexora.Contexts.ServiceExecutionMaintenance.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\contexts\service-execution-maintenance\Presentation\Nexora.Contexts.ServiceExecutionMaintenance.Presentation.csproj" />
+    <ProjectReference Include="..\..\contexts\subscriptions-payment-management\Application\Nexora.Contexts.SubscriptionsPaymentManagement.Application.csproj" />
+    <ProjectReference Include="..\..\contexts\subscriptions-payment-management\Infrastructure\Nexora.Contexts.SubscriptionsPaymentManagement.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\contexts\subscriptions-payment-management\Presentation\Nexora.Contexts.SubscriptionsPaymentManagement.Presentation.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Middleware\" />
+  </ItemGroup>
+
+</Project>
