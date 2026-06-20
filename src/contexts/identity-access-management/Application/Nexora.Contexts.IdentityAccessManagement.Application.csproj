@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Domain\Nexora.Contexts.IdentityAccessManagement.Domain.csproj" />
+    <ProjectReference Include="..\..\..\shared\Nexora.Shared.Domain\Nexora.Shared.Domain.csproj" />
+    <ProjectReference Include="..\..\resource-asset-management\Domain\Nexora.Contexts.ResourceAssetManagement.Domain.csproj" />
+    <ProjectReference Include="..\..\subscriptions-payment-management\Domain\Nexora.Contexts.SubscriptionsPaymentManagement.Domain.csproj" />
+    <ProjectReference Include="..\..\subscriptions-payment-management\Application\Nexora.Contexts.SubscriptionsPaymentManagement.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="7.1.2" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
