@@ -124,6 +124,10 @@ using (var scope = app.Services.CreateScope())
         {
             context.Database.Migrate();
         }
+        else
+        {
+            context.Database.EnsureCreated();
+        }
 
         // Safety net: backfill any properties that might still have null codes (idempotent)
         var backfill = scope.ServiceProvider.GetService<Nexora.Infrastructure.Services.PropertyCodeBackfillService>();
