@@ -25,6 +25,8 @@
     <ProjectReference Include="..\..\contexts\resource-asset-management\Presentation\Nexora.Contexts.ResourceAssetManagement.Presentation.csproj" />
     <ProjectReference Include="..\..\contexts\resource-asset-management\Domain\Nexora.Contexts.ResourceAssetManagement.Domain.csproj" />
     <ProjectReference Include="..\..\contexts\identity-access-management\Presentation\Nexora.Contexts.IdentityAccessManagement.Presentation.csproj" />
+    <ProjectReference Include="..\..\contexts\service-monitoring-intelligence\Domain\Nexora.Contexts.ServiceMonitoringIntelligence.Domain.csproj" />
+    <ProjectReference Include="..\..\contexts\service-monitoring-intelligence\Presentation\Nexora.Contexts.ServiceMonitoringIntelligence.Presentation.csproj" />
   </ItemGroup>
 
 </Project>
