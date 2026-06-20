@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Domain\Nexora.Contexts.ServiceMonitoringIntelligence.Domain.csproj" />
+    <ProjectReference Include="..\Application\Nexora.Contexts.ServiceMonitoringIntelligence.Application.csproj" />
+    <ProjectReference Include="..\..\..\shared\Nexora.Shared.Domain\Nexora.Shared.Domain.csproj" />
+    <ProjectReference Include="..\..\..\shared\Nexora.Shared.Infrastructure\Nexora.Shared.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="QuestPDF" Version="2026.5.0" />
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
