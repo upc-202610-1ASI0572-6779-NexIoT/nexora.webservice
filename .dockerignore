@@ -1,0 +1,15 @@
+.git/
+.github/
+.vs/
+.vscode/
+.idea/
+bin/
+obj/
+*.user
+*.suo
+*.sln.doc
+out/
+dist/
+node_modules/
+Dockerfile
+.dockerignore
