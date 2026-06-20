@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Domain\Nexora.Contexts.ResourceAssetManagement.Domain.csproj" />
+    <ProjectReference Include="..\..\..\shared\Nexora.Shared.Domain\Nexora.Shared.Domain.csproj" />
+    <ProjectReference Include="..\..\subscriptions-payment-management\Domain\Nexora.Contexts.SubscriptionsPaymentManagement.Domain.csproj" />
+    <ProjectReference Include="..\..\subscriptions-payment-management\Application\Nexora.Contexts.SubscriptionsPaymentManagement.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MediatR" Version="14.1.0" />
+  </ItemGroup>
+
+</Project>
