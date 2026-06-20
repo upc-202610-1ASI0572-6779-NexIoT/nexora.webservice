@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Domain\Nexora.Contexts.ServiceMonitoringIntelligence.Domain.csproj" />
+    <ProjectReference Include="..\..\..\shared\Nexora.Shared.Domain\Nexora.Shared.Domain.csproj" />
+    <ProjectReference Include="..\..\resource-asset-management\Domain\Nexora.Contexts.ResourceAssetManagement.Domain.csproj" />
+    <ProjectReference Include="..\..\service-execution-maintenance\Domain\Nexora.Contexts.ServiceExecutionMaintenance.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MediatR" Version="14.1.0" />
+  </ItemGroup>
+
+</Project>
