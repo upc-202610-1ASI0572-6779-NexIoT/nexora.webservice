@@ -9,11 +9,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace Nexora.Shared.Infrastructure.Migrations
+namespace Nexora.Infrastructure.Migrations
 {
     [DbContext(typeof(NexoraDbContext))]
-    [Migration("20260620083746_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20260617154917_AddSavedCardTable")]
+    partial class AddSavedCardTable
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -405,12 +405,6 @@ namespace Nexora.Shared.Infrastructure.Migrations
                         .HasColumnName("created_at")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
-                    b.Property<string>("Cvv")
-                        .IsRequired()
-                        .HasMaxLength(4)
-                        .HasColumnType("character varying(4)")
-                        .HasColumnName("cvv");
-
                     b.Property<string>("ExpiryMonth")
                         .IsRequired()
                         .HasMaxLength(2)
@@ -422,12 +416,6 @@ namespace Nexora.Shared.Infrastructure.Migrations
                         .HasMaxLength(2)
                         .HasColumnType("character varying(2)")
                         .HasColumnName("expiry_year");
-
-                    b.Property<string>("FullNumber")
-                        .IsRequired()
-                        .HasMaxLength(19)
-                        .HasColumnType("character varying(19)")
-                        .HasColumnName("full_number");
 
                     b.Property<string>("HolderName")
                         .IsRequired()
@@ -604,9 +592,6 @@ namespace Nexora.Shared.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("character varying(100)");
 
-                    b.Property<double>("ElectricityReading")
-                        .HasColumnType("double precision");
-
                     b.Property<double>("GasReading")
                         .HasColumnType("double precision");
 
@@ -615,9 +600,6 @@ namespace Nexora.Shared.Infrastructure.Migrations
 
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("VoltageOk")
-                        .HasColumnType("boolean");
 
                     b.Property<double>("WaterReading")
                         .HasColumnType("double precision");
@@ -630,80 +612,6 @@ namespace Nexora.Shared.Infrastructure.Migrations
                         .HasDatabaseName("IX_telemetry_logs_timestamp");
 
                     b.ToTable("telemetry_logs", (string)null);
-                });
-
-            modelBuilder.Entity("Nexora.Domain.Entities.Tenant", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("Address")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("address");
-
-                    b.Property<string>("City")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("city");
-
-                    b.Property<string>("Country")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("country");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<string>("FirstName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("first_name");
-
-                    b.Property<string>("LastName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("last_name");
-
-                    b.Property<string>("PhoneNumber")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasColumnName("phone_number");
-
-                    b.Property<long>("PropertyId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("property_id");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<long?>("UserId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PropertyId");
-
-                    b.HasIndex("UserId")
-                        .IsUnique();
-
-                    b.ToTable("tenants", (string)null);
                 });
 
             modelBuilder.Entity("Nexora.Domain.Entities.User", b =>
@@ -798,7 +706,7 @@ namespace Nexora.Shared.Infrastructure.Migrations
             modelBuilder.Entity("Nexora.Domain.Entities.Landlord", b =>
                 {
                     b.HasOne("Nexora.Domain.Entities.User", "User")
-                        .WithOne()
+                        .WithOne("Landlord")
                         .HasForeignKey("Nexora.Domain.Entities.Landlord", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -864,7 +772,7 @@ namespace Nexora.Shared.Infrastructure.Migrations
             modelBuilder.Entity("Nexora.Domain.Entities.Subscription", b =>
                 {
                     b.HasOne("Nexora.Domain.Entities.Landlord", "Landlord")
-                        .WithOne()
+                        .WithOne("Subscription")
                         .HasForeignKey("Nexora.Domain.Entities.Subscription", "LandlordId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -902,24 +810,6 @@ namespace Nexora.Shared.Infrastructure.Migrations
                     b.Navigation("Device");
                 });
 
-            modelBuilder.Entity("Nexora.Domain.Entities.Tenant", b =>
-                {
-                    b.HasOne("Nexora.Domain.Entities.Property", "Property")
-                        .WithMany("Tenants")
-                        .HasForeignKey("PropertyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Nexora.Domain.Entities.User", "User")
-                        .WithOne()
-                        .HasForeignKey("Nexora.Domain.Entities.Tenant", "UserId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("Property");
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("Nexora.Domain.Entities.Invoice", b =>
                 {
                     b.Navigation("Payments");
@@ -928,11 +818,8 @@ namespace Nexora.Shared.Infrastructure.Migrations
             modelBuilder.Entity("Nexora.Domain.Entities.Landlord", b =>
                 {
                     b.Navigation("Properties");
-                });
 
-            modelBuilder.Entity("Nexora.Domain.Entities.Property", b =>
-                {
-                    b.Navigation("Tenants");
+                    b.Navigation("Subscription");
                 });
 
             modelBuilder.Entity("Nexora.Domain.Entities.Subscription", b =>
@@ -940,6 +827,11 @@ namespace Nexora.Shared.Infrastructure.Migrations
                     b.Navigation("Events");
 
                     b.Navigation("Invoices");
+                });
+
+            modelBuilder.Entity("Nexora.Domain.Entities.User", b =>
+                {
+                    b.Navigation("Landlord");
                 });
 #pragma warning restore 612, 618
         }

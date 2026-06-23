@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Nexora.Infrastructure.Persistence;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Nexora.Infrastructure.Migrations
 {
     [DbContext(typeof(NexoraDbContext))]
-    partial class NexoraDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260618230723_AddCvvToSavedCards")]
+    partial class AddCvvToSavedCards
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -601,9 +604,6 @@ namespace Nexora.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("character varying(100)");
 
-                    b.Property<double>("ElectricityReading")
-                        .HasColumnType("double precision");
-
                     b.Property<double>("GasReading")
                         .HasColumnType("double precision");
 
@@ -612,9 +612,6 @@ namespace Nexora.Infrastructure.Migrations
 
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("VoltageOk")
-                        .HasColumnType("boolean");
 
                     b.Property<double>("WaterReading")
                         .HasColumnType("double precision");
