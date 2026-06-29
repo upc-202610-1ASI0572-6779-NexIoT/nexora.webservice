@@ -1,9 +1,6 @@
 using System;
 using System.Collections.Generic;
-<<<<<<< HEAD
 using System.Globalization;
-=======
->>>>>>> feature/report-analytics
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;

@@ -123,7 +123,7 @@ namespace Nexora.WebApi.Controllers
             }
         }
 
-        [HttpGet("consumption")]
+        [HttpGet("consumption-pdf")]
         [Authorize]
         public async Task<IActionResult> ExportConsumptionReport([FromQuery] int months = 6)
         {
