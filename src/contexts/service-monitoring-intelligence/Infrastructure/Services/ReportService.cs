@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Nexora.Application.Dto;
 using Nexora.Application.Services;
 using Nexora.Infrastructure.Persistence;
 using QuestPDF.Fluent;
@@ -235,6 +238,211 @@ namespace Nexora.Infrastructure.Services
             using var stream = new MemoryStream();
             document.GeneratePdf(stream);
             return stream.ToArray();
+        }
+
+        // ---------------------------------------------------------------------
+        // Consumption analytics for the mobile Reports module
+        // ---------------------------------------------------------------------
+
+        // Nominal mains voltage used to derive instantaneous power (kW) from the
+        // current (A) reported by the electrical sensor. Peru runs on ~220 V.
+        private const double NominalVoltage = 220.0;
+        // Safe operating thresholds mirror the embedded firmware limits.
+        private const double WaterSafeFlowLpm = 20.0;
+        private const double ElectricalSafeCurrentA = 20.0;
+
+        public async Task<ConsumptionReportDto> GetConsumptionReportAsync(string metric, string range, string? deviceId = null)
+        {
+            metric = (metric ?? "water").Trim().ToLowerInvariant();
+            if (metric != "electricity") metric = "water";
+            range = (range ?? "week").Trim().ToLowerInvariant();
+            bool isWater = metric == "water";
+
+            // Resolve bucketing for the requested range.
+            int bucketCount;
+            TimeSpan bucketSize;
+            string averageLabel;
+            switch (range)
+            {
+                case "day":   bucketCount = 24; bucketSize = TimeSpan.FromHours(1); averageLabel = "per hour";  break;
+                case "month": bucketCount = 30; bucketSize = TimeSpan.FromDays(1);  averageLabel = "per day";   break;
+                case "year":  bucketCount = 12; bucketSize = TimeSpan.FromDays(30); averageLabel = "per month"; break;
+                default:      range = "week"; bucketCount = 7; bucketSize = TimeSpan.FromDays(1); averageLabel = "per day"; break;
+            }
+            var window = TimeSpan.FromTicks(bucketSize.Ticks * bucketCount);
+
+            var dto = new ConsumptionReportDto
+            {
+                Metric = metric,
+                Range = range,
+                Unit = isWater ? "L" : "kWh",
+                RateUnit = isWater ? "L/min" : "kW",
+                AverageLabel = averageLabel,
+                SafeThreshold = Math.Round(isWater ? WaterSafeFlowLpm : (ElectricalSafeCurrentA * NominalVoltage / 1000.0), 2),
+                HasData = false,
+            };
+
+            var baseQuery = _context.TelemetryLogs.AsQueryable();
+            if (!string.IsNullOrWhiteSpace(deviceId))
+                baseQuery = baseQuery.Where(t => t.DeviceId == deviceId);
+
+            // Anchor the window to the most recent reading so the report always shows the
+            // latest available data (live when the edge is feeding, else the last batch).
+            var lastReadingAt = await baseQuery.Select(t => (DateTime?)t.Timestamp).MaxAsync();
+            if (lastReadingAt == null)
+            {
+                dto.Series = Enumerable.Repeat(0.0, bucketCount).ToList();
+                dto.AxisLabels = BuildAxisLabels(range, DateTime.UtcNow - window, DateTime.UtcNow);
+                return dto;
+            }
+
+            var end = lastReadingAt.Value;
+            var start = end - window;
+            var prevStart = start - window;
+
+            // We can only compare against the previous period if our history reaches
+            // back to (at least) the start of that period.
+            var firstReadingAt = await baseQuery.Select(t => (DateTime?)t.Timestamp).MinAsync();
+            bool comparable = firstReadingAt != null && firstReadingAt.Value <= prevStart + bucketSize;
+
+            var rows = await baseQuery
+                .Where(t => t.Timestamp > prevStart && t.Timestamp <= end)
+                .Select(t => new TelemetrySample
+                {
+                    DeviceId = t.DeviceId,
+                    Timestamp = t.Timestamp,
+                    Reading = isWater ? t.WaterReading : t.ElectricityReading
+                })
+                .ToListAsync();
+
+            // Instantaneous reading -> consumption contributed over one bucket.
+            double ToConsumption(double avgReading) => isWater
+                ? avgReading * bucketSize.TotalMinutes                          // L/min * min = L
+                : avgReading * (NominalVoltage / 1000.0) * bucketSize.TotalHours; // A -> kW -> kWh
+            // Instantaneous reading -> display rate (L/min or kW).
+            double ToRate(double reading) => isWater ? reading : reading * (NominalVoltage / 1000.0);
+
+            // Per-device, per-bucket consumption so a device that does not measure
+            // this metric (reporting 0) never dilutes the ones that do. Total is the
+            // sum across devices.
+            double[] BucketConsumption(IEnumerable<TelemetrySample> samples, DateTime winStart)
+            {
+                var arr = new double[bucketCount];
+                var list = samples.ToList();
+                for (int i = 0; i < bucketCount; i++)
+                {
+                    var b0 = winStart + TimeSpan.FromTicks(bucketSize.Ticks * i);
+                    var b1 = b0 + bucketSize;
+                    var inBucket = list.Where(s => s.Timestamp > b0 && s.Timestamp <= b1).Select(s => s.Reading).ToList();
+                    arr[i] = inBucket.Count > 0 ? ToConsumption(inBucket.Average()) : 0.0;
+                }
+                return arr;
+            }
+
+            var current = rows.Where(r => r.Timestamp > start && r.Timestamp <= end).ToList();
+            var previous = rows.Where(r => r.Timestamp > prevStart && r.Timestamp <= start).ToList();
+
+            // Current period: combined series + per-device totals.
+            var series = new double[bucketCount];
+            var sources = new List<ConsumptionSourceDto>();
+            foreach (var g in current.GroupBy(r => r.DeviceId))
+            {
+                var devSeries = BucketConsumption(g, start);
+                for (int i = 0; i < bucketCount; i++) series[i] += devSeries[i];
+                sources.Add(new ConsumptionSourceDto
+                {
+                    DeviceId = g.Key,
+                    Label = FriendlyDeviceLabel(g.Key),
+                    Value = Math.Round(devSeries.Sum(), 2),
+                });
+            }
+            double total = series.Sum();
+
+            // Previous period total (for the delta).
+            double previousTotal = 0.0;
+            foreach (var g in previous.GroupBy(r => r.DeviceId))
+                previousTotal += BucketConsumption(g, prevStart).Sum();
+
+            // Peak instantaneous rate within the current window.
+            double peak = 0; DateTime? peakAt = null;
+            foreach (var r in current)
+            {
+                var rate = ToRate(r.Reading);
+                if (rate > peak) { peak = rate; peakAt = r.Timestamp; }
+            }
+
+            // Finalise source shares (drop sources that contributed nothing).
+            sources = sources.Where(s => s.Value > 0.01).OrderByDescending(s => s.Value).ToList();
+            foreach (var s in sources)
+                s.SharePercent = total > 0 ? Math.Round(s.Value / total * 100.0, 1) : 0.0;
+
+            double deltaPercent;
+            if (previousTotal > 0.01) deltaPercent = (total - previousTotal) / previousTotal * 100.0;
+            else deltaPercent = total > 0 ? 100.0 : 0.0;
+
+            dto.Series = series.Select(v => Math.Round(v, 2)).ToList();
+            dto.AxisLabels = BuildAxisLabels(range, start, end);
+            dto.Total = Math.Round(total, 2);
+            dto.PreviousTotal = Math.Round(previousTotal, 2);
+            dto.DeltaPercent = Math.Round(deltaPercent, 1);
+            dto.Increase = total >= previousTotal;
+            dto.Comparable = comparable;
+            dto.Average = Math.Round(total / bucketCount, 2);
+            dto.Peak = Math.Round(peak, 2);
+            dto.PeakAt = peakAt;
+            dto.HighUsage = peak >= dto.SafeThreshold && peak > 0;
+            dto.Sources = sources;
+            dto.SampleCount = current.Count;
+            dto.LastReadingAt = end;
+            dto.HasData = current.Count > 0;
+            return dto;
+        }
+
+        private sealed class TelemetrySample
+        {
+            public string DeviceId { get; set; } = null!;
+            public DateTime Timestamp { get; set; }
+            public double Reading { get; set; }
+        }
+
+        private static List<string> BuildAxisLabels(string range, DateTime start, DateTime end)
+        {
+            const int n = 5;
+            var labels = new List<string>();
+            var span = end - start;
+            for (int i = 0; i < n; i++)
+            {
+                var t = start + TimeSpan.FromTicks(span.Ticks * i / (n - 1));
+                labels.Add(FormatAxis(range, t));
+            }
+            return labels;
+        }
+
+        private static string FormatAxis(string range, DateTime t)
+        {
+            var ci = CultureInfo.InvariantCulture;
+            switch (range)
+            {
+                case "day":
+                    int h12 = t.Hour % 12; if (h12 == 0) h12 = 12;
+                    return $"{h12}{(t.Hour < 12 ? "a" : "p")}";
+                case "month":
+                    return t.ToString("M/d", ci);
+                case "year":
+                    return t.ToString("MMM", ci);
+                default: // week
+                    return t.ToString("ddd", ci);
+            }
+        }
+
+        private static string FriendlyDeviceLabel(string deviceId)
+        {
+            var id = (deviceId ?? string.Empty).ToLowerInvariant();
+            if (id.Contains("water")) return "Water line";
+            if (id.Contains("volt") || id.Contains("power") || id.Contains("elect") || id.Contains("current"))
+                return "Electrical panel";
+            if (id.Contains("gas")) return "Gas unit";
+            return string.IsNullOrWhiteSpace(deviceId) ? "Unknown device" : deviceId;
         }
     }
 }

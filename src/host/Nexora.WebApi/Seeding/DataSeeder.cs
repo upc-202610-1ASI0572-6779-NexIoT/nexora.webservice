@@ -66,6 +66,82 @@ namespace Nexora.WebApi.Seeding
 
             await SeedTenantDataAsync();
             await SeedSubscriptionDataAsync();
+            await SeedTelemetryDataAsync();
+        }
+
+        /// <summary>
+        /// Seeds a year of realistic water and electricity telemetry for two devices
+        /// attached to the first property, so the Reports module shows real, varied
+        /// data across every range (day / week / month / year). Idempotent: only runs
+        /// when no telemetry exists yet.
+        /// </summary>
+        private async Task SeedTelemetryDataAsync()
+        {
+            if (await _context.TelemetryLogs.AnyAsync()) return;
+
+            var property = await _context.Properties.OrderBy(p => p.Id).FirstOrDefaultAsync();
+            if (property == null) return;
+
+            const string waterDeviceId = "water-safety-unit-apt-402";
+            const string powerDeviceId = "voltage-safety-unit-apt-402";
+
+            var now = DateTime.UtcNow;
+
+            // Ensure the two source devices exist and belong to the property.
+            foreach (var id in new[] { waterDeviceId, powerDeviceId })
+            {
+                var device = await _context.Devices.FindAsync(id);
+                if (device == null)
+                {
+                    device = new Device(id, ConnectionStatus.Online, now);
+                    device.AssignToProperty(property.Id);
+                    await _context.Devices.AddAsync(device);
+                }
+            }
+            await _context.SaveChangesAsync();
+
+            var rng = new Random(20260101);
+            var logs = new List<TelemetryLog>();
+
+            // Build the sampling timeline: hourly for the last 45 days (fine grain for
+            // day/week/month views) and every 4 hours further back to one year (keeps the
+            // year view populated without exploding the row count).
+            var timeline = new List<DateTime>();
+            var oneYearAgo = now.AddDays(-365);
+            var fineGrainStart = now.AddDays(-45);
+            for (var t = oneYearAgo; t < fineGrainStart; t = t.AddHours(4)) timeline.Add(t);
+            for (var t = fineGrainStart; t <= now; t = t.AddHours(1)) timeline.Add(t);
+
+            foreach (var ts in timeline)
+            {
+                // Diurnal shape: low overnight, peaks in the morning and the evening.
+                double hour = ts.Hour + ts.Minute / 60.0;
+                double morning = Math.Exp(-Math.Pow(hour - 8.0, 2) / 6.0);
+                double evening = Math.Exp(-Math.Pow(hour - 20.0, 2) / 8.0);
+                double daily = morning + evening;
+                bool weekend = ts.DayOfWeek == DayOfWeek.Saturday || ts.DayOfWeek == DayOfWeek.Sunday;
+                double weekendBoost = weekend ? 1.25 : 1.0;
+                // Mild seasonal trend across the year.
+                double seasonal = 1.0 + 0.15 * Math.Sin(2 * Math.PI * ts.DayOfYear / 365.0);
+
+                // Water flow (L/min): mostly idle with morning/evening usage, rare spikes.
+                double waterFlow = (0.15 + 3.2 * daily * weekendBoost * seasonal) * (0.7 + rng.NextDouble() * 0.6);
+                if (rng.NextDouble() < 0.012) waterFlow += 18 + rng.NextDouble() * 10; // occasional leak/spike (> safe 20)
+                waterFlow = Math.Max(0, Math.Round(waterFlow, 2));
+
+                bool presence = daily > 0.25 ? rng.NextDouble() < 0.6 : rng.NextDouble() < 0.1;
+                logs.Add(new TelemetryLog(waterDeviceId, waterFlow, 0, presence, 0, true, ts));
+
+                // Electrical current (A): always-on baseline plus appliance peaks.
+                double current = (1.4 + 5.5 * daily * weekendBoost * seasonal) * (0.75 + rng.NextDouble() * 0.5);
+                if (rng.NextDouble() < 0.008) current += 14 + rng.NextDouble() * 9; // occasional overcurrent (> safe 20)
+                current = Math.Max(0, Math.Round(current, 2));
+                bool voltageOk = rng.NextDouble() > 0.01;
+                logs.Add(new TelemetryLog(powerDeviceId, 0, 0, false, current, voltageOk, ts));
+            }
+
+            await _context.TelemetryLogs.AddRangeAsync(logs);
+            await _context.SaveChangesAsync();
         }
 
         private async Task SeedTenantDataAsync()

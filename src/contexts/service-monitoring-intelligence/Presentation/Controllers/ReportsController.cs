@@ -16,6 +16,28 @@ namespace Nexora.WebApi.Controllers
             _reportService = reportService;
         }
 
+        /// <summary>
+        /// Returns an aggregated, chart-ready consumption report for the mobile Reports
+        /// module. Aggregates real telemetry into a trend series, totals, peak, the
+        /// change vs the previous period and a per-device breakdown.
+        /// </summary>
+        [HttpGet("consumption")]
+        public async Task<IActionResult> GetConsumption(
+            [FromQuery] string metric = "water",
+            [FromQuery] string range = "week",
+            [FromQuery] string? deviceId = null)
+        {
+            try
+            {
+                var report = await _reportService.GetConsumptionReportAsync(metric, range, deviceId);
+                return Ok(report);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Error building consumption report: {ex.Message}");
+            }
+        }
+
         [HttpGet]
         public async Task<IActionResult> ExportReport(
             [FromQuery] string deviceId, 
