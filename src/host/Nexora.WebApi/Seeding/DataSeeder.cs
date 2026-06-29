@@ -67,6 +67,7 @@ namespace Nexora.WebApi.Seeding
             await SeedTenantDataAsync();
             await SeedSubscriptionDataAsync();
             await SeedTelemetryDataAsync();
+            await SeedDeveloperDataAsync();
         }
 
         /// <summary>
@@ -428,6 +429,377 @@ namespace Nexora.WebApi.Seeding
                         existingCard.Id
                     );
                 }
+            }
+        }
+
+        private async Task SeedDeveloperDataAsync()
+        {
+            var devUser = await _context.Users.FirstOrDefaultAsync(u => u.Email == "developer@nexora.com");
+            if (devUser == null)
+            {
+                var registerDto = new RegisterDto("developer@nexora.com", "root", "Dev", "Developer", "Perú", "Lima", "Av. Javier Prado 100", "999999999");
+                await _authService.RegisterAsync(registerDto);
+                devUser = await _context.Users.FirstOrDefaultAsync(u => u.Email == "developer@nexora.com");
+            }
+
+            var devLandlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == devUser.Id);
+            if (devLandlord == null) return;
+
+            // --- 1. Subscription & Billing for developer@nexora.com ---
+            var professionalPlan = await _context.SubscriptionPlans.FindAsync(2L);
+            if (professionalPlan != null)
+            {
+                var now = DateTime.UtcNow;
+                var sixMonthsAgo = now.AddMonths(-6);
+
+                var devSubscription = await _context.Subscriptions
+                    .FirstOrDefaultAsync(s => s.LandlordId == devLandlord.Id);
+
+                if (devSubscription == null)
+                {
+                    devSubscription = new Subscription(
+                        devLandlord.Id,
+                        professionalPlan.Id,
+                        sixMonthsAgo,
+                        sixMonthsAgo.AddMonths(1)
+                    );
+                    _context.Subscriptions.Add(devSubscription);
+                    await _context.SaveChangesAsync();
+                }
+
+                var subId = devSubscription.Id;
+                await _context.Database.ExecuteSqlRawAsync(
+                    "UPDATE subscriptions SET started_at = {0}, current_period_start = {1}, current_period_end = {2}, subscription_plan_id = {3} WHERE id = {4}",
+                    sixMonthsAgo,
+                    now.AddMonths(-1),
+                    now.AddMonths(1),
+                    professionalPlan.Id,
+                    subId
+                );
+
+                // 6 Invoices
+                decimal[] monthlyAmounts = [
+                    professionalPlan.MonthlyPrice,
+                    professionalPlan.MonthlyPrice,
+                    professionalPlan.MonthlyPrice,
+                    professionalPlan.MonthlyPrice,
+                    professionalPlan.MonthlyPrice,
+                    professionalPlan.MonthlyPrice
+                ];
+
+                var devInvoices = await _context.Invoices
+                    .Where(i => i.SubscriptionId == subId)
+                    .OrderBy(i => i.Id)
+                    .ToListAsync();
+
+                if (devInvoices.Count == 0)
+                {
+                    for (int i = 0; i < 6; i++)
+                    {
+                        var periodStart = sixMonthsAgo.AddMonths(i);
+                        var dueDate = periodStart.AddDays(7);
+                        var inv = new Invoice(subId, monthlyAmounts[i], dueDate);
+                        _context.Invoices.Add(inv);
+                    }
+                    await _context.SaveChangesAsync();
+
+                    devInvoices = await _context.Invoices
+                        .Where(i => i.SubscriptionId == subId)
+                        .OrderBy(i => i.Id)
+                        .ToListAsync();
+                }
+
+                for (int i = 0; i < devInvoices.Count && i < 6; i++)
+                {
+                    var inv = devInvoices[i];
+                    var invCreatedAt = sixMonthsAgo.AddMonths(i).AddDays(1);
+                    var periodStart = sixMonthsAgo.AddMonths(i);
+                    var dueDate = periodStart.AddDays(7);
+                    var invStatus = i < 5 ? "Paid" : "Pending";
+
+                    await _context.Database.ExecuteSqlRawAsync(
+                        "UPDATE invoices SET created_at = {0}, status = {1}, amount = {2}, due_date = {3} WHERE id = {4}",
+                        invCreatedAt,
+                        invStatus,
+                        monthlyAmounts[i],
+                        dueDate,
+                        inv.Id
+                    );
+                }
+
+                // Payments for paid invoices
+                var paidDevInvoices = devInvoices.Take(5).ToList();
+                foreach (var inv in paidDevInvoices)
+                {
+                    var hasPayment = await _context.Payments.AnyAsync(p => p.InvoiceId == inv.Id);
+                    if (!hasPayment)
+                    {
+                        var payment = new Payment(inv.Id, inv.Amount, "stripe", $"pi_dev_{Guid.NewGuid().ToString("N")[..12]}");
+                        payment.Succeed();
+                        _context.Payments.Add(payment);
+                    }
+                }
+                await _context.SaveChangesAsync();
+
+                var paidDevInvoiceIds = paidDevInvoices.Select(i => i.Id).ToList();
+                var devPayments = await _context.Payments
+                    .Where(p => paidDevInvoiceIds.Contains(p.InvoiceId))
+                    .ToListAsync();
+
+                foreach (var payment in devPayments)
+                {
+                    var matchInv = paidDevInvoices.FirstOrDefault(i => i.Id == payment.InvoiceId);
+                    if (matchInv == null) continue;
+                    var paidAt = matchInv.DueDate.AddDays(1);
+                    await _context.Database.ExecuteSqlRawAsync(
+                        "UPDATE payments SET paid_at = {0} WHERE id = {1}",
+                        paidAt,
+                        payment.Id
+                    );
+                }
+
+                // Saved Card
+                var devCard = await _context.SavedCards.FirstOrDefaultAsync(c => c.LandlordId == devLandlord.Id);
+                if (devCard == null)
+                {
+                    devCard = new SavedCard(
+                        devLandlord.Id,
+                        "MasterCard",
+                        "5555555555555555",
+                        "09",
+                        "29",
+                        "Dev Developer",
+                        "987",
+                        true
+                    );
+                    _context.SavedCards.Add(devCard);
+                    await _context.SaveChangesAsync();
+
+                    await _context.Database.ExecuteSqlRawAsync(
+                        "UPDATE saved_cards SET created_at = {0} WHERE id = {1}",
+                        sixMonthsAgo,
+                        devCard.Id
+                    );
+                }
+            }
+
+            // --- 2. Properties ---
+            var devProperties = await _context.Properties
+                .Where(p => p.LandlordId == devLandlord.Id)
+                .ToListAsync();
+
+            if (devProperties.Count == 0)
+            {
+                var properties = new[] {
+                    (Name: "Barranco Ocean View Suite", Description: "Ocean view apartment", Type: PropertyType.APARTMENT, Country: "Peru", City: "Lima", Address: "Malecón Paul Harris 250", IsSecurityModeArmed: false),
+                    (Name: "Skyline Industrial Sector A", Description: "Industrial logistics warehouse", Type: PropertyType.COMMERCIAL, Country: "Peru", City: "Lima", Address: "Av. Industrial 400", IsSecurityModeArmed: true),
+                    (Name: "San Isidro Offices", Description: "Corporate office building", Type: PropertyType.OFFICE, Country: "Peru", City: "Lima", Address: "Av. San Borja Sur 600", IsSecurityModeArmed: false)
+                };
+
+                foreach (var p in properties)
+                {
+                    var cmd = new CreatePropertyCommand(p.Name, p.Description, p.Type, p.Country, p.City, p.Address, p.IsSecurityModeArmed, devUser.Id);
+                    await _mediator.Send(cmd);
+                }
+                await _context.SaveChangesAsync();
+
+                devProperties = await _context.Properties
+                    .Where(p => p.LandlordId == devLandlord.Id)
+                    .ToListAsync();
+            }
+
+            // --- 3. Tenants ---
+            var hasDevTenants = await _context.Tenants.AnyAsync(t => devProperties.Select(p => p.Id).Contains(t.PropertyId));
+            if (!hasDevTenants && devProperties.Count >= 3)
+            {
+                var tenants = new[] {
+                    new Tenant(devProperties[0].Id, "Juan", "Pérez", "Perú", "Lima", "Av. Larco 123", "999111001"),
+                    new Tenant(devProperties[1].Id, "Sofía", "Martínez", "Perú", "Lima", "Jr. Unión 456", "999111002"),
+                    new Tenant(devProperties[2].Id, "Carlos", "Fernández", "Perú", "Lima", "Av. Primavera 111", "999111005")
+                };
+
+                foreach (var tenant in tenants)
+                {
+                    _context.Tenants.Add(tenant);
+                }
+                await _context.SaveChangesAsync();
+            }
+
+            // --- 4. Devices ---
+            if (devProperties.Count >= 3)
+            {
+                var propBarranco = devProperties[0];
+                var propSkyline = devProperties[1];
+                var propSanIsidro = devProperties[2];
+
+                var devicesToSeed = new[] {
+                    (Id: "voltage-safety-unit-apt-402", ConnectionStatus: ConnectionStatus.Online, PropertyId: propBarranco.Id),
+                    (Id: "gas-safety-unit-apt-402", ConnectionStatus: ConnectionStatus.Online, PropertyId: propBarranco.Id),
+                    (Id: "safety-gateway-skyline-01", ConnectionStatus: ConnectionStatus.Online, PropertyId: propSkyline.Id),
+                    (Id: "safety-gateway-san-isidro-02", ConnectionStatus: ConnectionStatus.Offline, PropertyId: propSanIsidro.Id)
+                };
+
+                foreach (var devData in devicesToSeed)
+                {
+                    var existingDev = await _context.Devices.FindAsync(devData.Id);
+                    if (existingDev == null)
+                    {
+                        existingDev = new Device(devData.Id, devData.ConnectionStatus, DateTime.UtcNow.AddMinutes(-10));
+                        _context.Devices.Add(existingDev);
+                    }
+                    existingDev.AssignToProperty(devData.PropertyId);
+                }
+                await _context.SaveChangesAsync();
+            }
+
+            // --- 5. Telemetry Logs ---
+            var deviceIds = new[] { "voltage-safety-unit-apt-402", "gas-safety-unit-apt-402", "safety-gateway-skyline-01", "safety-gateway-san-isidro-02" };
+            var nowTime = DateTime.UtcNow;
+            
+            var existingLogs = await _context.TelemetryLogs
+                .Where(t => deviceIds.Contains(t.DeviceId))
+                .ToListAsync();
+            if (existingLogs.Any())
+            {
+                _context.TelemetryLogs.RemoveRange(existingLogs);
+                await _context.SaveChangesAsync();
+            }
+
+            {
+                var rand = new Random();
+                for (int m = 5; m >= 0; m--)
+                {
+                    var monthDate = nowTime.AddMonths(-m);
+                    for (int l = 0; l < 5; l++)
+                    {
+                        var timestamp = new DateTime(monthDate.Year, monthDate.Month, Math.Min(monthDate.Day + l * 2 + 1, 28), 10 + l, 0, 0, DateTimeKind.Utc);
+                        
+                        _context.TelemetryLogs.Add(new TelemetryLog(
+                            "voltage-safety-unit-apt-402",
+                            1.0 + rand.NextDouble() * 3.0,
+                            0.0,
+                            false,
+                            12.0 + rand.NextDouble() * 5.0,
+                            true,
+                            timestamp
+                        ));
+
+                        _context.TelemetryLogs.Add(new TelemetryLog(
+                            "gas-safety-unit-apt-402",
+                            0.0,
+                            30.0 + rand.NextDouble() * 40.0,
+                            false,
+                            0.0,
+                            true,
+                            timestamp
+                        ));
+
+                        _context.TelemetryLogs.Add(new TelemetryLog(
+                            "safety-gateway-skyline-01",
+                            0.0,
+                            0.0,
+                            true,
+                            8.0 + rand.NextDouble() * 6.0,
+                            true,
+                            timestamp
+                        ));
+
+                        _context.TelemetryLogs.Add(new TelemetryLog(
+                            "safety-gateway-san-isidro-02",
+                            2.0 + rand.NextDouble() * 2.0,
+                            0.0,
+                            false,
+                            5.0 + rand.NextDouble() * 4.0,
+                            true,
+                            timestamp
+                        ));
+                    }
+                }
+
+                var anomalyTime1 = nowTime.AddHours(-2);
+                var anomalyTime2 = nowTime.AddHours(-1);
+                var anomalyTime3 = nowTime.AddMinutes(-30);
+
+                _context.TelemetryLogs.Add(new TelemetryLog(
+                    "voltage-safety-unit-apt-402",
+                    2.1,
+                    0.0,
+                    false,
+                    15.4,
+                    false, // Anomaly!
+                    anomalyTime1
+                ));
+
+                _context.TelemetryLogs.Add(new TelemetryLog(
+                    "voltage-safety-unit-apt-402",
+                    1.8,
+                    0.0,
+                    false,
+                    22.5, // Anomaly!
+                    true,
+                    anomalyTime2
+                ));
+
+                _context.TelemetryLogs.Add(new TelemetryLog(
+                    "gas-safety-unit-apt-402",
+                    0.0,
+                    320.0, // Anomaly!
+                    false,
+                    0.0,
+                    true,
+                    anomalyTime3
+                ));
+
+                await _context.SaveChangesAsync();
+            }
+
+            // --- 6. Alerts & Tickets ---
+            var hasAlerts = await _context.Alerts.AnyAsync(a => deviceIds.Contains(a.DeviceId));
+            if (!hasAlerts)
+            {
+                var alertTime1 = nowTime.AddHours(-2);
+                var alertTime2 = nowTime.AddHours(-1);
+                var alertTime3 = nowTime.AddMinutes(-30);
+
+                var alert1 = new Alert(
+                    AlertSeverity.Critical,
+                    "Voltage Instability Anomaly",
+                    alertTime1,
+                    "voltage-safety-unit-apt-402"
+                );
+                _context.Alerts.Add(alert1);
+
+                var alert2 = new Alert(
+                    AlertSeverity.Warning,
+                    "Overcurrent Detected",
+                    alertTime2,
+                    "voltage-safety-unit-apt-402"
+                );
+                _context.Alerts.Add(alert2);
+
+                var alert3 = new Alert(
+                    AlertSeverity.Critical,
+                    "Critical Gas Leak Level",
+                    alertTime3,
+                    "gas-safety-unit-apt-402"
+                );
+                _context.Alerts.Add(alert3);
+
+                await _context.SaveChangesAsync();
+
+                var ticket1 = new MaintenanceTicket(alert1);
+                ticket1.Assign("Ing. Carlos Mendoza");
+                _context.MaintenanceTickets.Add(ticket1);
+
+                var ticket2 = new MaintenanceTicket(alert2);
+                _context.MaintenanceTickets.Add(ticket2);
+
+                var ticket3 = new MaintenanceTicket(alert3);
+                ticket3.Assign("Ing. Sofía Reyes");
+                ticket3.Resolve();
+                _context.MaintenanceTickets.Add(ticket3);
+
+                await _context.SaveChangesAsync();
             }
         }
     }
