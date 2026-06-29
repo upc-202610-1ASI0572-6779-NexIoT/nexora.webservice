@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+<<<<<<< HEAD
 using System.Globalization;
+=======
+>>>>>>> feature/report-analytics
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -443,6 +446,193 @@ namespace Nexora.Infrastructure.Services
                 return "Electrical panel";
             if (id.Contains("gas")) return "Gas unit";
             return string.IsNullOrWhiteSpace(deviceId) ? "Unknown device" : deviceId;
+        }
+
+        public async Task<byte[]> GenerateConsumptionPdfReportAsync(long userId, int months)
+        {
+            if (months <= 0) months = 6;
+
+            var landlord = await _context.Landlords
+                .FirstOrDefaultAsync(l => l.UserId == userId);
+            if (landlord == null) throw new ArgumentException("Landlord profile not found.");
+
+            long landlordId = landlord.Id;
+
+            var properties = await _context.Properties
+                .Where(p => p.LandlordId == landlordId)
+                .ToListAsync();
+
+            var propertyIds = properties.Select(p => p.Id).ToList();
+            var devices = await _context.Devices
+                .Where(d => d.PropertyId != null && propertyIds.Contains(d.PropertyId.Value))
+                .ToListAsync();
+
+            var deviceIds = devices.Select(d => d.Id).ToList();
+
+            var now = DateTime.UtcNow;
+            var startPeriod = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(-(months - 1));
+
+            var logs = await _context.TelemetryLogs
+                .Where(t => deviceIds.Contains(t.DeviceId) && t.Timestamp >= startPeriod)
+                .ToListAsync();
+
+            var monthsList = new List<string>();
+            var energyValues = new List<double>();
+            var gasValues = new List<double>();
+
+            for (int i = months - 1; i >= 0; i--)
+            {
+                var targetMonth = now.AddMonths(-i);
+                var monthLabel = targetMonth.ToString("MMM").ToUpper();
+                monthsList.Add(monthLabel);
+
+                var monthLogs = logs
+                    .Where(l => l.Timestamp.Year == targetMonth.Year && l.Timestamp.Month == targetMonth.Month)
+                    .ToList();
+
+                var monthEnergy = monthLogs.Sum(l => l.ElectricityReading) * 10;
+                var monthGas = monthLogs.Sum(l => l.GasReading) * 2;
+
+                energyValues.Add(Math.Round(monthEnergy, 0));
+                gasValues.Add(Math.Round(monthGas, 0));
+            }
+
+            var currentEnergyVal = energyValues[months - 1];
+            var currentGasVal = gasValues[months - 1];
+            var currentCost = (currentEnergyVal * 1.5) + (currentGasVal * 4.0);
+
+            var document = Document.Create(container =>
+            {
+                container.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.Margin(2, Unit.Centimetre);
+                    page.PageColor(Colors.White);
+                    page.DefaultTextStyle(x => x.FontSize(11));
+
+                    page.Header()
+                        .Text($"Reporte de Consumo Nexora - Landlord ID: {landlordId}")
+                        .SemiBold().FontSize(18).FontColor(Colors.Orange.Darken3);
+
+                    page.Content()
+                        .PaddingVertical(1, Unit.Centimetre)
+                        .Column(column =>
+                        {
+                            column.Spacing(20);
+
+                            // Section 1: Consumption Summary
+                            column.Item().Text("Resumen de Consumo Mensual Activo").SemiBold().FontSize(14);
+                            column.Item().Table(table =>
+                            {
+                                table.ColumnsDefinition(columns =>
+                                {
+                                    columns.RelativeColumn(1);
+                                    columns.RelativeColumn(1);
+                                    columns.RelativeColumn(1);
+                                });
+
+                                table.Header(header =>
+                                {
+                                    header.Cell().BorderBottom(1).Padding(5).Text("Energia Total (kWh)").Bold();
+                                    header.Cell().BorderBottom(1).Padding(5).Text("Gas Total (m3)").Bold();
+                                    header.Cell().BorderBottom(1).Padding(5).Text("Costo Proyectado ($)").Bold();
+                                });
+
+                                table.Cell().Padding(5).Text($"{currentEnergyVal:N0}");
+                                table.Cell().Padding(5).Text($"{currentGasVal:N0}");
+                                table.Cell().Padding(5).Text($"${currentCost:N2}");
+                            });
+
+                            // Section 2: Monthly breakdown
+                            column.Item().Text("Historial de Consumo por Mes").SemiBold().FontSize(14);
+                            column.Item().Table(table =>
+                            {
+                                table.ColumnsDefinition(columns =>
+                                {
+                                    columns.RelativeColumn(1);
+                                    columns.RelativeColumn(1);
+                                    columns.RelativeColumn(1);
+                                });
+
+                                table.Header(header =>
+                                {
+                                    header.Cell().BorderBottom(1).Padding(5).Text("Mes").Bold();
+                                    header.Cell().BorderBottom(1).Padding(5).Text("Energia (kWh)").Bold();
+                                    header.Cell().BorderBottom(1).Padding(5).Text("Gas (m3)").Bold();
+                                });
+
+                                for (int idx = 0; idx < months; idx++)
+                                {
+                                    table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text(monthsList[idx]);
+                                    table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{energyValues[idx]:N0}");
+                                    table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{gasValues[idx]:N0}");
+                                }
+                            });
+
+                            // Section 3: Property breakdown
+                            column.Item().Text("Desglose por Propidades").SemiBold().FontSize(14);
+                            column.Item().Table(table =>
+                            {
+                                table.ColumnsDefinition(columns =>
+                                {
+                                    columns.RelativeColumn(3);
+                                    columns.RelativeColumn(2);
+                                    columns.RelativeColumn(2);
+                                    columns.RelativeColumn(2);
+                                    columns.RelativeColumn(2);
+                                });
+
+                                table.Header(header =>
+                                {
+                                    header.Cell().BorderBottom(1).Padding(5).Text("Propiedad").Bold();
+                                    header.Cell().BorderBottom(1).Padding(5).Text("Ubicacion").Bold();
+                                    header.Cell().BorderBottom(1).Padding(5).Text("Energia (kWh)").Bold();
+                                    header.Cell().BorderBottom(1).Padding(5).Text("Gas (m3)").Bold();
+                                    header.Cell().BorderBottom(1).Padding(5).Text("Estado").Bold();
+                                });
+
+                                foreach (var prop in properties)
+                                {
+                                    var propDevices = devices.Where(d => d.PropertyId == prop.Id).Select(d => d.Id).ToList();
+                                    var propLogs = logs
+                                        .Where(l => propDevices.Contains(l.DeviceId) && l.Timestamp.Year == now.Year && l.Timestamp.Month == now.Month)
+                                        .ToList();
+
+                                    var propEnergy = Math.Round(propLogs.Sum(l => l.ElectricityReading) * 10, 0);
+                                    var propGas = Math.Round(propLogs.Sum(l => l.GasReading) * 2, 0);
+
+                                    string status = "optimal";
+                                    if (propEnergy > 1500 || propGas > 400)
+                                    {
+                                        status = "high-load";
+                                    }
+                                    else if (propEnergy > 800 || propGas > 200)
+                                    {
+                                        status = "monitor";
+                                    }
+
+                                    table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text(prop.Name);
+                                    table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{prop.City}, {prop.Country}");
+                                    table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{propEnergy:N0}");
+                                    table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{propGas:N0}");
+                                    table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text(status.ToUpper());
+                                }
+                            });
+                        });
+
+                    page.Footer()
+                        .AlignCenter()
+                        .Text(x =>
+                        {
+                            x.Span("Pagina ");
+                            x.CurrentPageNumber();
+                        });
+                });
+            });
+
+            using var stream = new MemoryStream();
+            document.GeneratePdf(stream);
+            return stream.ToArray();
         }
     }
 }
