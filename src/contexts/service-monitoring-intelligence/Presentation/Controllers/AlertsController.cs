@@ -59,7 +59,15 @@ namespace Nexora.WebApi.Controllers
                     Severity = a.Severity.ToString(),
                     a.Timestamp,
                     a.DeviceId,
-                    a.Type
+                    a.Type,
+                    PropertyName = a.Device != null && a.Device.Property != null ? a.Device.Property.Name : "Unassigned",
+                    Reading = _context.TelemetryLogs
+                        .Where(t => t.DeviceId == a.DeviceId && t.Timestamp <= a.Timestamp)
+                        .OrderByDescending(t => t.Timestamp)
+                        .Select(t => a.Type.Contains("Gas") ? t.GasReading : 
+                                     a.Type.Contains("Overcurrent") ? t.ElectricityReading : 
+                                     a.Type.Contains("Voltage") ? (t.VoltageOk ? 1.0 : 0.0) : 0.0)
+                        .FirstOrDefault()
                 })
                 .ToListAsync();
 
