@@ -45,7 +45,7 @@ builder.Services.AddCors(options =>
         policy.AllowAnyOrigin()
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .WithExposedHeaders("Content-Disposition");
+              .WithExposedHeaders("Content-Disposition", "X-Total-Count");
     });
 });
 // Repositories & UoW
