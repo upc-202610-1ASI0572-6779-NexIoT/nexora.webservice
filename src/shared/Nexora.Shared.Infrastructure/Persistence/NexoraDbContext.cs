@@ -62,6 +62,7 @@ namespace Nexora.Infrastructure.Persistence
                 entity.Property(l => l.City).HasColumnName("city").HasMaxLength(100).IsRequired();
                 entity.Property(l => l.Address).HasColumnName("address").HasMaxLength(255).IsRequired();
                 entity.Property(l => l.PhoneNumber).HasColumnName("phone_number").HasMaxLength(20);
+                entity.Property(l => l.StripeCustomerId).HasColumnName("stripe_customer_id").HasMaxLength(100);
                 entity.Property(l => l.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
                 entity.Property(l => l.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
 
@@ -211,6 +212,7 @@ namespace Nexora.Infrastructure.Persistence
                 entity.Property(s => s.CurrentPeriodEnd).HasColumnName("current_period_end").IsRequired();
                 entity.Property(s => s.CancelAtPeriodEnd).HasColumnName("cancel_at_period_end").HasDefaultValue(false);
                 entity.Property(s => s.CancelledAt).HasColumnName("cancelled_at");
+                entity.Property(s => s.StripeSubscriptionId).HasColumnName("stripe_subscription_id").HasMaxLength(100);
 
                 entity.HasOne(s => s.Landlord)
                     .WithOne()
