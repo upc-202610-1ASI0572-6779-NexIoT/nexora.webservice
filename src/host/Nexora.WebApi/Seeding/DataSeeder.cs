@@ -28,6 +28,35 @@ namespace Nexora.WebApi.Seeding
 
         public async Task EnsureSeedDataAsync()
         {
+            // Temporary Cleanup for testing: remove subscriptions for test@example.com and sebasram@nexora.com
+            var targetEmails = new[] { "test@example.com", "sebasram@nexora.com" };
+            foreach (var email in targetEmails)
+            {
+                var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
+                if (user != null)
+                {
+                    var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == user.Id);
+                    if (landlord != null)
+                    {
+                        var subs = await _context.Subscriptions
+                            .Include(s => s.Invoices)
+                            .Where(s => s.LandlordId == landlord.Id)
+                            .ToListAsync();
+                        foreach (var sub in subs)
+                        {
+                            var invoiceIds = sub.Invoices.Select(i => i.Id).ToList();
+                            var payments = await _context.Payments.Where(p => invoiceIds.Contains(p.InvoiceId)).ToListAsync();
+                            _context.Payments.RemoveRange(payments);
+                            _context.Invoices.RemoveRange(sub.Invoices);
+                            var events = await _context.SubscriptionEvents.Where(e => e.SubscriptionId == sub.Id).ToListAsync();
+                            _context.SubscriptionEvents.RemoveRange(events);
+                            _context.Subscriptions.Remove(sub);
+                        }
+                    }
+                }
+            }
+            await _context.SaveChangesAsync();
+
             if (!await _context.Users.AnyAsync())
             {
                 var users = new[] {
@@ -271,7 +300,7 @@ namespace Nexora.WebApi.Seeding
                 var periodStart = sixMonthsAgo.AddMonths(i);
                 var dueDate = periodStart.AddDays(7);
 
-                var invStatus = i < 5 ? "Paid" : "Pending";
+                var invStatus = "Paid";
 
                 await _context.Database.ExecuteSqlRawAsync(
                     "UPDATE invoices SET created_at = {0}, status = {1}, amount = {2}, due_date = {3} WHERE id = {4}",
@@ -302,8 +331,8 @@ namespace Nexora.WebApi.Seeding
                 }
             }
 
-            // --- 3. Payments: one per paid invoice (months 1-5) ---
-            var paidInvoices = existingInvoices.Take(5).ToList();
+            // --- 3. Payments: one per paid invoice (months 1-6) ---
+            var paidInvoices = existingInvoices.Take(6).ToList();
 
             foreach (var inv in paidInvoices)
             {
@@ -515,7 +544,7 @@ namespace Nexora.WebApi.Seeding
                     var invCreatedAt = sixMonthsAgo.AddMonths(i).AddDays(1);
                     var periodStart = sixMonthsAgo.AddMonths(i);
                     var dueDate = periodStart.AddDays(7);
-                    var invStatus = i < 5 ? "Paid" : "Pending";
+                    var invStatus = "Paid";
 
                     await _context.Database.ExecuteSqlRawAsync(
                         "UPDATE invoices SET created_at = {0}, status = {1}, amount = {2}, due_date = {3} WHERE id = {4}",
@@ -528,7 +557,7 @@ namespace Nexora.WebApi.Seeding
                 }
 
                 // Payments for paid invoices
-                var paidDevInvoices = devInvoices.Take(5).ToList();
+                var paidDevInvoices = devInvoices.Take(6).ToList();
                 foreach (var inv in paidDevInvoices)
                 {
                     var hasPayment = await _context.Payments.AnyAsync(p => p.InvoiceId == inv.Id);

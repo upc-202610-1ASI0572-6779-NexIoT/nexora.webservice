@@ -24,6 +24,7 @@ namespace Nexora.Domain.Entities
         public bool CancelAtPeriodEnd { get; private set; }
 
         public DateTime? CancelledAt { get; private set; }
+        public string? StripeSubscriptionId { get; private set; }
 
         public ICollection<Invoice> Invoices { get; private set; } = new List<Invoice>();
         public ICollection<SubscriptionEvent> Events { get; private set; } = new List<SubscriptionEvent>();
@@ -89,6 +90,11 @@ namespace Nexora.Domain.Entities
             CurrentPeriodEnd = periodEnd;
             Status = SubscriptionStatus.Active;
             CancelAtPeriodEnd = false;
+        }
+
+        public void SetStripeSubscriptionId(string stripeSubscriptionId)
+        {
+            StripeSubscriptionId = stripeSubscriptionId;
         }
     }
 }
