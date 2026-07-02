@@ -7,6 +7,12 @@ using Nexora.Domain.Enums;
 using Nexora.Domain.Repositories;
 using Nexora.Infrastructure.Persistence;
 using System.Security.Claims;
+using Stripe;
+
+using StripeInvoice = Stripe.Invoice;
+using StripeSubscription = Stripe.Subscription;
+using LocalInvoice = Nexora.Domain.Entities.Invoice;
+using LocalSubscription = Nexora.Domain.Entities.Subscription;
 
 namespace Nexora.WebApi.Controllers
 {
@@ -83,10 +89,93 @@ namespace Nexora.WebApi.Controllers
             if (existing != null)
                 return BadRequest("Landlord already has a subscription.");
 
+            // 1. Stripe Customer Creation/Verification
+            if (string.IsNullOrEmpty(landlord.StripeCustomerId))
+            {
+                var customerService = new CustomerService();
+                var email = User.FindFirstValue(ClaimTypes.Email) ?? "landlord@nexora.com";
+                var customer = await customerService.CreateAsync(new CustomerCreateOptions
+                {
+                    Email = email,
+                    Name = $"{landlord.FirstName} {landlord.LastName}",
+                    Metadata = new Dictionary<string, string>
+                    {
+                        { "landlord_id", landlord.Id.ToString() }
+                    }
+                });
+                landlord.SetStripeCustomerId(customer.Id);
+                await _landlordRepository.UpdateAsync(landlord);
+                await _unitOfWork.SaveChangesAsync();
+            }
+
+            // 2. Stripe Product & Price dynamic check/creation
+            var productService = new ProductService();
+            Product product;
+            try
+            {
+                product = await productService.GetAsync($"plan_{plan.Id}");
+            }
+            catch (StripeException)
+            {
+                product = await productService.CreateAsync(new ProductCreateOptions
+                {
+                    Id = $"plan_{plan.Id}",
+                    Name = plan.Name,
+                    Description = $"Nexora Subscription Plan: {plan.Name}"
+                });
+            }
+
+            var priceService = new PriceService();
+            var prices = await priceService.ListAsync(new PriceListOptions
+            {
+                Product = product.Id,
+                Active = true
+            });
+            var price = prices.FirstOrDefault(p => p.UnitAmount == (long)(plan.MonthlyPrice * 100));
+            if (price == null)
+            {
+                price = await priceService.CreateAsync(new PriceCreateOptions
+                {
+                    Product = product.Id,
+                    UnitAmount = (long)(plan.MonthlyPrice * 100),
+                    Currency = "usd",
+                    Recurring = new PriceRecurringOptions
+                    {
+                        Interval = "month"
+                    }
+                });
+            }
+
+            // 3. Stripe Subscription creation (incomplete, waiting for card confirmation)
+            // 3. Stripe Subscription creation (incomplete, waiting for card confirmation)
+            var stripeSubscriptionService = new Stripe.SubscriptionService();
+            StripeSubscription stripeSubscription = await stripeSubscriptionService.CreateAsync(new Stripe.SubscriptionCreateOptions
+            {
+                Customer = landlord.StripeCustomerId,
+                Items = new List<Stripe.SubscriptionItemOptions>
+                {
+                    new Stripe.SubscriptionItemOptions
+                    {
+                        Price = price.Id
+                    }
+                },
+                PaymentBehavior = "default_incomplete",
+                PaymentSettings = new Stripe.SubscriptionPaymentSettingsOptions
+                {
+                    SaveDefaultPaymentMethod = "on_subscription"
+                },
+                Expand = new List<string> { "latest_invoice.payment_intent" }
+            });
+
+            StripeInvoice stripeInvoice = stripeSubscription.LatestInvoice;
+            var clientSecret = stripeInvoice.ConfirmationSecret?.ClientSecret;
+
+            // 4. Local Database Creation
             var now = DateTime.UtcNow;
             var periodEnd = now.AddMonths(1);
 
-            var subscription = new Subscription(landlord.Id, plan.Id, now, periodEnd);
+            var subscription = new LocalSubscription(landlord.Id, plan.Id, now, periodEnd);
+            subscription.SetStripeSubscriptionId(stripeSubscription.Id);
 
             await _subscriptionRepository.AddAsync(subscription);
             await _unitOfWork.SaveChangesAsync();
@@ -94,12 +183,12 @@ namespace Nexora.WebApi.Controllers
             var subFromDb = await _subscriptionRepository.GetByIdAsync(subscription.Id);
 
             var dueDate = now.AddDays(7);
-            var invoice = new Invoice(subscription.Id, plan.MonthlyPrice, dueDate);
+            var invoice = new LocalInvoice(subscription.Id, plan.MonthlyPrice, dueDate);
 
             _context.Invoices.Add(invoice);
 
             var evt = new SubscriptionEvent(subscription.Id, "Subscription Created",
-                $"Plan {plan.Name} activated. ${plan.MonthlyPrice}/mo.");
+                $"Plan {plan.Name} activated. ${plan.MonthlyPrice}/mo. Stripe Subscription: {stripeSubscription.Id}");
 
             _context.SubscriptionEvents.Add(evt);
 
@@ -107,7 +196,7 @@ namespace Nexora.WebApi.Controllers
 
             var subDto = MapToDto(subFromDb!);
 
-            return Ok(new ActivateSubscriptionResponse(subDto, plan.MonthlyPrice, dueDate, invoice.Id));
+            return Ok(new ActivateSubscriptionResponse(subDto, plan.MonthlyPrice, dueDate, invoice.Id, clientSecret));
         }
 
         [Authorize]
@@ -256,7 +345,7 @@ namespace Nexora.WebApi.Controllers
             return await _landlordRepository.GetByUserIdAsync(userId);
         }
 
-        private static SubscriptionDto MapToDto(Subscription s)
+        private static SubscriptionDto MapToDto(Nexora.Domain.Entities.Subscription s)
         {
             return new SubscriptionDto(
                 s.Id,

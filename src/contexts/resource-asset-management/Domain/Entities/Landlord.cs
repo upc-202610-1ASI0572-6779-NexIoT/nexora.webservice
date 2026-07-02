@@ -15,6 +15,7 @@ namespace Nexora.Domain.Entities
         public string City { get; private set; } = null!;
         public string Address { get; private set; } = null!;
         public string? PhoneNumber { get; private set; }
+        public string? StripeCustomerId { get; private set; }
         
         public DateTime CreatedAt { get; private set; }
         public DateTime UpdatedAt { get; private set; }
@@ -46,6 +47,12 @@ namespace Nexora.Domain.Entities
             City = city;
             Address = address;
             PhoneNumber = phoneNumber;
+            UpdatedAt = DateTime.UtcNow;
+        }
+
+        public void SetStripeCustomerId(string stripeCustomerId)
+        {
+            StripeCustomerId = stripeCustomerId;
             UpdatedAt = DateTime.UtcNow;
         }
     }
