@@ -87,7 +87,108 @@ namespace Nexora.WebApi.Controllers
 
             var existing = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
             if (existing != null)
-                return BadRequest("Landlord already has a subscription.");
+            {
+                if (existing.Status == SubscriptionStatus.Cancelled || existing.Status == SubscriptionStatus.Expired)
+                {
+                    // Clean up and remove old inactive subscription from database
+                    var oldInvs = await _context.Invoices.Where(i => i.SubscriptionId == existing.Id).ToListAsync();
+                    var oldInvIds = oldInvs.Select(i => i.Id).ToList();
+                    var oldPmts = await _context.Payments.Where(p => oldInvIds.Contains(p.InvoiceId)).ToListAsync();
+                    var oldEvts = await _context.SubscriptionEvents.Where(e => e.SubscriptionId == existing.Id).ToListAsync();
+
+                    _context.Payments.RemoveRange(oldPmts);
+                    _context.Invoices.RemoveRange(oldInvs);
+                    _context.SubscriptionEvents.RemoveRange(oldEvts);
+                    _context.Subscriptions.Remove(existing);
+
+                    await _unitOfWork.SaveChangesAsync();
+                }
+                else
+                {
+                    // Upgrade/Downgrade Plan Change Flow
+                    if (existing.SubscriptionPlanId == plan.Id)
+                    {
+                        return BadRequest("Already subscribed to this plan.");
+                    }
+
+                    // 1. Stripe Product & Price dynamic check/creation
+                    var stripeProductService = new ProductService();
+                    Product stripeProduct;
+                    try
+                    {
+                        stripeProduct = await stripeProductService.GetAsync($"plan_{plan.Id}");
+                    }
+                    catch (StripeException)
+                    {
+                        stripeProduct = await stripeProductService.CreateAsync(new ProductCreateOptions
+                        {
+                            Id = $"plan_{plan.Id}",
+                            Name = plan.Name,
+                            Description = $"Nexora Subscription Plan: {plan.Name}"
+                        });
+                    }
+
+                    var stripePriceService = new PriceService();
+                    var stripePrices = await stripePriceService.ListAsync(new PriceListOptions
+                    {
+                        Product = stripeProduct.Id,
+                        Active = true
+                    });
+                    var stripePrice = stripePrices.FirstOrDefault(p => p.UnitAmount == (long)(plan.MonthlyPrice * 100));
+                    if (stripePrice == null)
+                    {
+                        stripePrice = await stripePriceService.CreateAsync(new PriceCreateOptions
+                        {
+                            Product = stripeProduct.Id,
+                            UnitAmount = (long)(plan.MonthlyPrice * 100),
+                            Currency = "usd",
+                            Recurring = new PriceRecurringOptions { Interval = "month" }
+                        });
+                    }
+
+                    // 2. Update Stripe Subscription
+                    var stripeSubSvc = new Stripe.SubscriptionService();
+                    var stripeSub = await stripeSubSvc.GetAsync(existing.StripeSubscriptionId);
+                    var subscriptionItem = stripeSub.Items.Data.First();
+
+                    var stripeSubscriptionUpdateOptions = new Stripe.SubscriptionUpdateOptions
+                    {
+                        Items = new List<Stripe.SubscriptionItemOptions>
+                        {
+                            new Stripe.SubscriptionItemOptions
+                            {
+                                Id = subscriptionItem.Id,
+                                Price = stripePrice.Id
+                            }
+                        },
+                        ProrationBehavior = "create_prorations"
+                    };
+                    stripeSubscriptionUpdateOptions.AddExpand("latest_invoice.confirmation_secret");
+
+                    stripeSub = await stripeSubSvc.UpdateAsync(existing.StripeSubscriptionId, stripeSubscriptionUpdateOptions);
+
+                    // 3. Local database update
+                    existing.ChangePlan(plan.Id, DateTime.UtcNow.AddMonths(1));
+                    await _subscriptionRepository.UpdateAsync(existing);
+
+                    var changePlanEvt = new SubscriptionEvent(
+                        existing.Id,
+                        "Plan Changed",
+                        $"Upgraded/Downgraded plan to: {plan.Name}. Price: ${plan.MonthlyPrice}/mo."
+                    );
+                    _context.SubscriptionEvents.Add(changePlanEvt);
+
+                    await _unitOfWork.SaveChangesAsync();
+
+                    var prorationClientSecret = stripeSub.LatestInvoice?.ConfirmationSecret?.ClientSecret;
+
+                    return Ok(new
+                    {
+                        subscription = MapToDto(existing),
+                        clientSecret = prorationClientSecret
+                    });
+                }
+            }
 
             // 1. Stripe Customer Creation/Verification
             if (string.IsNullOrEmpty(landlord.StripeCustomerId))
@@ -164,7 +265,7 @@ namespace Nexora.WebApi.Controllers
                 {
                     SaveDefaultPaymentMethod = "on_subscription"
                 },
-                Expand = new List<string> { "latest_invoice.payment_intent" }
+                Expand = new List<string> { "latest_invoice.confirmation_secret" }
             });
 
             StripeInvoice stripeInvoice = stripeSubscription.LatestInvoice;
@@ -234,6 +335,65 @@ namespace Nexora.WebApi.Controllers
                 .FirstOrDefaultAsync(c => c.Id == id && c.LandlordId == landlord.Id);
 
             if (card == null) return NotFound();
+
+            return Ok(new PaymentMethodDetailDto(
+                card.Id,
+                card.Brand,
+                card.LastFour,
+                card.FullNumber,
+                card.ExpiryMonth,
+                card.ExpiryYear,
+                card.HolderName,
+                card.Cvv
+            ));
+        }
+
+        [Authorize]
+        [HttpPost("payment-methods")]
+        public async Task<IActionResult> CreatePaymentMethod([FromBody] UpdatePaymentMethodRequest request)
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null) return Unauthorized();
+
+            // If a card already exists, update it instead of creating duplicates
+            var existingCard = await _context.SavedCards
+                .FirstOrDefaultAsync(c => c.LandlordId == landlord.Id);
+
+            if (existingCard != null)
+            {
+                existingCard.Update(
+                    request.Brand,
+                    request.FullNumber,
+                    request.ExpiryMonth,
+                    request.ExpiryYear,
+                    request.HolderName,
+                    request.Cvv
+                );
+                await _context.SaveChangesAsync();
+                return Ok(new PaymentMethodDetailDto(
+                    existingCard.Id,
+                    existingCard.Brand,
+                    existingCard.LastFour,
+                    existingCard.FullNumber,
+                    existingCard.ExpiryMonth,
+                    existingCard.ExpiryYear,
+                    existingCard.HolderName,
+                    existingCard.Cvv
+                ));
+            }
+
+            var card = new SavedCard(
+                landlord.Id,
+                request.Brand,
+                request.FullNumber,
+                request.ExpiryMonth,
+                request.ExpiryYear,
+                request.HolderName,
+                request.Cvv
+            );
+
+            _context.SavedCards.Add(card);
+            await _context.SaveChangesAsync();
 
             return Ok(new PaymentMethodDetailDto(
                 card.Id,
