@@ -28,6 +28,35 @@ namespace Nexora.WebApi.Seeding
 
         public async Task EnsureSeedDataAsync()
         {
+            // Temporary Cleanup for testing: remove subscriptions for test@example.com and sebasram@nexora.com
+            var targetEmails = new[] { "test@example.com", "sebasram@nexora.com" };
+            foreach (var email in targetEmails)
+            {
+                var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
+                if (user != null)
+                {
+                    var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == user.Id);
+                    if (landlord != null)
+                    {
+                        var subs = await _context.Subscriptions
+                            .Include(s => s.Invoices)
+                            .Where(s => s.LandlordId == landlord.Id)
+                            .ToListAsync();
+                        foreach (var sub in subs)
+                        {
+                            var invoiceIds = sub.Invoices.Select(i => i.Id).ToList();
+                            var payments = await _context.Payments.Where(p => invoiceIds.Contains(p.InvoiceId)).ToListAsync();
+                            _context.Payments.RemoveRange(payments);
+                            _context.Invoices.RemoveRange(sub.Invoices);
+                            var events = await _context.SubscriptionEvents.Where(e => e.SubscriptionId == sub.Id).ToListAsync();
+                            _context.SubscriptionEvents.RemoveRange(events);
+                            _context.Subscriptions.Remove(sub);
+                        }
+                    }
+                }
+            }
+            await _context.SaveChangesAsync();
+
             if (!await _context.Users.AnyAsync())
             {
                 var users = new[] {

@@ -1,10 +1,11 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RollForward>Major</RollForward>
+    <UserSecretsId>5c0934bf-5aa6-4dfc-a6b6-8d62227bd3c8</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

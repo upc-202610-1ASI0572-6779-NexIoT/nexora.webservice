@@ -42,16 +42,16 @@ namespace Nexora.Domain.Entities
 
         public void Update(string? brand, string? fullNumber, string? expiryMonth, string? expiryYear, string? holderName, string? cvv)
         {
-            if (brand != null) Brand = brand;
-            if (fullNumber != null)
+            if (!string.IsNullOrEmpty(brand)) Brand = brand;
+            if (!string.IsNullOrEmpty(fullNumber))
             {
                 FullNumber = fullNumber;
                 LastFour = fullNumber.Length >= 4 ? fullNumber[^4..] : fullNumber;
             }
-            if (expiryMonth != null) ExpiryMonth = expiryMonth;
-            if (expiryYear != null) ExpiryYear = expiryYear;
-            if (holderName != null) HolderName = holderName;
-            if (cvv != null) Cvv = cvv;
+            if (!string.IsNullOrEmpty(expiryMonth)) ExpiryMonth = expiryMonth;
+            if (!string.IsNullOrEmpty(expiryYear)) ExpiryYear = expiryYear;
+            if (!string.IsNullOrEmpty(holderName)) HolderName = holderName;
+            if (!string.IsNullOrEmpty(cvv)) Cvv = cvv;
         }
     }
 }
