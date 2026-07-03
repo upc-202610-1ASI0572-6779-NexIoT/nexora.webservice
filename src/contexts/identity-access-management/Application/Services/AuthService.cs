@@ -12,15 +12,18 @@ namespace Nexora.Application.Services
     public class AuthService : IAuthService
     {
         private readonly IUserRepository _userRepository;
+        private readonly ILandlordRepository _landlordRepository;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IConfiguration _configuration;
 
         public AuthService(
             IUserRepository userRepository,
+            ILandlordRepository landlordRepository,
             IUnitOfWork unitOfWork,
             IConfiguration configuration)
         {
             _userRepository = userRepository;
+            _landlordRepository = landlordRepository;
             _unitOfWork = unitOfWork;
             _configuration = configuration;
         }
@@ -54,6 +57,19 @@ namespace Nexora.Application.Services
             );
 
             await _userRepository.AddAsync(user);
+            await _unitOfWork.SaveChangesAsync();
+
+            var landlord = new Landlord(
+                user.Id,
+                registerDto.FirstName,
+                registerDto.LastName,
+                registerDto.Country,
+                registerDto.City,
+                registerDto.Address,
+                registerDto.PhoneNumber
+            );
+
+            await _landlordRepository.AddAsync(landlord);
             await _unitOfWork.SaveChangesAsync();
 
             var token = GenerateJwtToken(user);

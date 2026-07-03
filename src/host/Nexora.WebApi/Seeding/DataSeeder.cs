@@ -43,6 +43,31 @@ namespace Nexora.WebApi.Seeding
                 }
             }
 
+            // Ensure all users have a landlord profile (heals existing database states where landlords are missing)
+            var dbUsers = await _context.Users.ToListAsync();
+            foreach (var user in dbUsers)
+            {
+                var landlordExists = await _context.Landlords.AnyAsync(l => l.UserId == user.Id);
+                if (!landlordExists)
+                {
+                    string firstName = "Admin";
+                    string lastName = "User";
+                    string country = "DefaultCountry";
+                    string city = "DefaultCity";
+                    string address = "DefaultAddress";
+                    string? phone = null;
+
+                    if (user.Email == "test@example.com") { firstName = "Juan"; lastName = "Pérez"; country = "México"; city = "CDMX"; address = "Calle 123"; phone = "5512345678"; }
+                    else if (user.Email == "jh_slin@nexora.com") { firstName = "Jhosep"; lastName = "Argomedo"; country = "México"; city = "Ciudad de México"; address = "96 Av. P.º de la Reforma"; phone = "978777386"; }
+                    else if (user.Email == "sebasram@nexora.com") { firstName = "Sebastian"; lastName = "Ramirez"; country = "Argentina"; city = "Resistencia"; address = "Av. Chaco 743"; phone = "936083234"; }
+                    else if (user.Email == "mario.pinedo@gmail.com") { firstName = "Mario"; lastName = "Pinedo"; country = "Perú"; city = "Lima"; address = "Av. La Molina 2550"; phone = "987654321"; }
+
+                    var landlord = new Landlord(user.Id, firstName, lastName, country, city, address, phone);
+                    await _context.Landlords.AddAsync(landlord);
+                }
+            }
+            await _context.SaveChangesAsync();
+
             if (!await _context.Properties.AnyAsync())
             {
                 var properties = new[] {

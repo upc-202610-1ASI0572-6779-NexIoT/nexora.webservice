@@ -60,46 +60,79 @@ namespace Nexora.WebApi.Controllers
             return NoContent();
         }
 
+        private async Task<int?> CalculateHealthScoreAsync(long propertyId)
+        {
+            var devices = await _context.Devices
+                .Where(d => d.PropertyId == propertyId)
+                .ToListAsync();
+
+            if (!devices.Any()) return null;
+
+            var offlineCount = devices.Count(d => d.ConnectionStatus == ConnectionStatus.Offline);
+
+            var deviceIds = devices.Select(d => d.Id).ToList();
+            var criticalAlertCount = await _context.Alerts
+                .Where(a => deviceIds.Contains(a.DeviceId) && 
+                            a.Severity == AlertSeverity.Critical && 
+                            a.Timestamp >= DateTime.UtcNow.AddDays(-1))
+                .Select(a => new { a.DeviceId, a.Type })
+                .Distinct()
+                .CountAsync();
+
+            int score = 100 - (offlineCount * 30) - (criticalAlertCount * 40);
+            return Math.Max(0, Math.Min(100, score));
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] string? code = null)
         {
             if (!string.IsNullOrEmpty(code))
             {
                 var property = await _context.Properties
-                    .Where(p => p.PropertyCode == code)
-                    .Select(p => new PropertyDto(
-                        p.Id,
-                        p.PropertyCode,
-                        p.Name,
-                        p.Description,
-                        p.PropertyType,
-                        p.Country,
-                        p.City,
-                        p.Address,
-                        p.Status,
-                        p.IsSecurityModeArmed,
-                        p.CreatedAt,
-                        p.UpdatedAt,
-                        new LandlordDto(
-                            p.Landlord.Id,
-                            p.Landlord.UserId,
-                            p.Landlord.FirstName,
-                            p.Landlord.LastName,
-                            p.Landlord.PhoneNumber
-                        )
-                    ))
-                    .FirstOrDefaultAsync();
+                    .Include(p => p.Landlord)
+                    .FirstOrDefaultAsync(p => p.PropertyCode == code);
 
                 if (property == null) return NotFound();
-                return Ok(property);
+
+                var healthScore = await CalculateHealthScoreAsync(property.Id);
+
+                return Ok(new PropertyDto(
+                    property.Id,
+                    property.PropertyCode,
+                    property.Name,
+                    property.Description,
+                    property.PropertyType,
+                    property.Country,
+                    property.City,
+                    property.Address,
+                    property.Status,
+                    property.IsSecurityModeArmed,
+                    property.CreatedAt,
+                    property.UpdatedAt,
+                    new LandlordDto(
+                        property.Landlord.Id,
+                        property.Landlord.UserId,
+                        property.Landlord.FirstName,
+                        property.Landlord.LastName,
+                        property.Landlord.PhoneNumber
+                    ),
+                    healthScore
+                ));
             }
 
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
 
             var properties = await _context.Properties
+                .Include(p => p.Landlord)
                 .Where(p => p.Landlord.UserId == userId)
-                .Select(p => new PropertyDto(
+                .ToListAsync();
+
+            var dtos = new List<PropertyDto>();
+            foreach (var p in properties)
+            {
+                var healthScore = await CalculateHealthScoreAsync(p.Id);
+                dtos.Add(new PropertyDto(
                     p.Id,
                     p.PropertyCode,
                     p.Name,
@@ -118,43 +151,47 @@ namespace Nexora.WebApi.Controllers
                         p.Landlord.FirstName,
                         p.Landlord.LastName,
                         p.Landlord.PhoneNumber
-                    )
-                ))
-                .ToListAsync();
+                    ),
+                    healthScore
+                ));
+            }
 
-            return Ok(properties);
+            return Ok(dtos);
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(long id)
         {
             var property = await _context.Properties
-                .Where(p => p.Id == id)
-                .Select(p => new PropertyDto(
-                    p.Id,
-                    p.PropertyCode,
-                    p.Name,
-                    p.Description,
-                    p.PropertyType,
-                    p.Country,
-                    p.City,
-                    p.Address,
-                    p.Status,
-                    p.IsSecurityModeArmed,
-                    p.CreatedAt,
-                    p.UpdatedAt,
-                    new LandlordDto(
-                        p.Landlord.Id,
-                        p.Landlord.UserId,
-                        p.Landlord.FirstName,
-                        p.Landlord.LastName,
-                        p.Landlord.PhoneNumber
-                    )
-                ))
-                .FirstOrDefaultAsync();
+                .Include(p => p.Landlord)
+                .FirstOrDefaultAsync(p => p.Id == id);
 
             if (property == null) return NotFound();
-            return Ok(property);
+
+            var healthScore = await CalculateHealthScoreAsync(property.Id);
+
+            return Ok(new PropertyDto(
+                property.Id,
+                property.PropertyCode,
+                property.Name,
+                property.Description,
+                property.PropertyType,
+                property.Country,
+                property.City,
+                property.Address,
+                property.Status,
+                property.IsSecurityModeArmed,
+                property.CreatedAt,
+                property.UpdatedAt,
+                new LandlordDto(
+                    property.Landlord.Id,
+                    property.Landlord.UserId,
+                    property.Landlord.FirstName,
+                    property.Landlord.LastName,
+                    property.Landlord.PhoneNumber
+                ),
+                healthScore
+            ));
         }
 
         [HttpGet("stats")]

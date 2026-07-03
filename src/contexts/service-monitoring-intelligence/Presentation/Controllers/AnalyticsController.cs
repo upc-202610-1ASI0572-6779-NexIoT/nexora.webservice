@@ -155,5 +155,73 @@ namespace Nexora.WebApi.Controllers
                 propertyBreakdown = propertyBreakdowns
             });
         }
+
+        [HttpGet("live-consumption")]
+        public async Task<IActionResult> GetLiveConsumption([FromQuery] string range = "24h")
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
+            if (landlord == null) return NotFound("Landlord profile not found.");
+
+            var propertyIds = await _context.Properties
+                .Where(p => p.LandlordId == landlord.Id)
+                .Select(p => p.Id)
+                .ToListAsync();
+
+            var deviceIds = await _context.Devices
+                .Where(d => d.PropertyId != null && propertyIds.Contains(d.PropertyId.Value))
+                .Select(d => d.Id)
+                .ToListAsync();
+
+            var now = DateTime.UtcNow;
+            var labels = new List<string>();
+            var gasData = new List<double>();
+            var electricityData = new List<double>();
+
+            if (range == "7d")
+            {
+                // Last 7 days
+                for (int i = 6; i >= 0; i--)
+                {
+                    var date = now.AddDays(-i).Date;
+                    labels.Add(date.ToString("ddd"));
+
+                    var dayLogs = await _context.TelemetryLogs
+                        .Where(t => deviceIds.Contains(t.DeviceId) && t.Timestamp.Date == date)
+                        .ToListAsync();
+
+                    gasData.Add(dayLogs.Any() ? Math.Round(dayLogs.Average(t => t.GasReading), 1) : 0);
+                    electricityData.Add(dayLogs.Any() ? Math.Round(dayLogs.Average(t => t.ElectricityReading), 1) : 0);
+                }
+            }
+            else
+            {
+                // Last 24 hours (grouped in 8 intervals of 3 hours)
+                for (int i = 7; i >= 0; i--)
+                {
+                    var time = now.AddHours(-i * 3);
+                    labels.Add(time.ToString("h tt"));
+
+                    var startTime = time.AddHours(-3);
+                    var endTime = time;
+
+                    var intervalLogs = await _context.TelemetryLogs
+                        .Where(t => deviceIds.Contains(t.DeviceId) && t.Timestamp > startTime && t.Timestamp <= endTime)
+                        .ToListAsync();
+
+                    gasData.Add(intervalLogs.Any() ? Math.Round(intervalLogs.Average(t => t.GasReading), 1) : 0);
+                    electricityData.Add(intervalLogs.Any() ? Math.Round(intervalLogs.Average(t => t.ElectricityReading), 1) : 0);
+                }
+            }
+
+            return Ok(new
+            {
+                labels,
+                gas = gasData,
+                electricity = electricityData
+            });
+        }
     }
 }
