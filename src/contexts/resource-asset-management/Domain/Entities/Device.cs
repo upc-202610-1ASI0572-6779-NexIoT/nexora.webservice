@@ -11,7 +11,7 @@ namespace Nexora.Domain.Entities
         public long? PropertyId { get; private set; }
         public Property? Property { get; private set; }
 
-        public void AssignToProperty(long propertyId)
+        public void AssignToProperty(long? propertyId)
         {
             PropertyId = propertyId;
         }
