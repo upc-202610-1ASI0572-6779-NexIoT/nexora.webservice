@@ -5,9 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Nexora.Application.Commands.Tenant;
 using Nexora.Application.Dto;
 using Nexora.Infrastructure.Persistence;
-using Nexora.Interface.DTOs;
-using System.Linq;
-using System.Threading.Tasks;
+using System.Security.Claims;
 
 namespace Nexora.WebApi.Controllers
 {
@@ -28,6 +26,13 @@ namespace Nexora.WebApi.Controllers
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateTenantDto request)
         {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            var propertyOwned = await _context.Properties
+                .AnyAsync(p => p.Id == request.PropertyId && p.Landlord.UserId == userId);
+            if (!propertyOwned) return NotFound("Property not found or not owned by current user.");
+
             var cmd = new CreateTenantCommand(
                 request.PropertyId,
                 request.FirstName,
@@ -44,9 +49,13 @@ namespace Nexora.WebApi.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(long id)
         {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
             var tenant = await _context.Tenants
-                .Where(t => t.Id == id)
-                .Select(t => new TenantDetailDto(
+                .Where(t => t.Id == id && t.Property.Landlord.UserId == userId)
+                .Select(t => new
+                {
                     t.Id,
                     t.PropertyId,
                     t.UserId,
@@ -56,11 +65,9 @@ namespace Nexora.WebApi.Controllers
                     t.City,
                     t.Address,
                     t.PhoneNumber,
-                    t.User != null ? t.User.Email : null,
-                    t.User != null ? t.User.IsActive : null,
                     t.CreatedAt,
                     t.UpdatedAt
-                ))
+                })
                 .FirstOrDefaultAsync();
 
             if (tenant == null) return NotFound();
@@ -70,7 +77,11 @@ namespace Nexora.WebApi.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
             var tenants = await _context.Tenants
+                .Where(t => t.Property.Landlord.UserId == userId)
                 .Select(t => new TenantDto(
                     t.Id,
                     t.PropertyId,
@@ -92,8 +103,11 @@ namespace Nexora.WebApi.Controllers
         [HttpGet("/api/v1/properties/{propertyId}/tenants")]
         public async Task<IActionResult> GetByProperty(long propertyId)
         {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
             var tenants = await _context.Tenants
-                .Where(t => t.PropertyId == propertyId)
+                .Where(t => t.PropertyId == propertyId && t.Property.Landlord.UserId == userId)
                 .Select(t => new TenantDto(
                     t.Id,
                     t.PropertyId,
@@ -115,6 +129,13 @@ namespace Nexora.WebApi.Controllers
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(long id, [FromBody] UpdateTenantRequest request)
         {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            var owned = await _context.Tenants
+                .AnyAsync(t => t.Id == id && t.Property.Landlord.UserId == userId);
+            if (!owned) return NotFound();
+
             var cmd = new UpdateTenantCommand(
                 id,
                 request.FirstName,
@@ -133,6 +154,13 @@ namespace Nexora.WebApi.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(long id)
         {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            var owned = await _context.Tenants
+                .AnyAsync(t => t.Id == id && t.Property.Landlord.UserId == userId);
+            if (!owned) return NotFound();
+
             var cmd = new DeleteTenantCommand(id);
             var result = await _mediator.Send(cmd);
             if (!result) return NotFound();
