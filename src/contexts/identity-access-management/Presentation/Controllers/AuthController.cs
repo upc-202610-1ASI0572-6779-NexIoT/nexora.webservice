@@ -7,7 +7,7 @@ using System.Security.Claims;
 namespace Nexora.WebApi.Controllers
 {
     [ApiController]
-    [Route("api/v1/authentication")]
+    [Route("api/v1/auth")]
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
@@ -17,20 +17,54 @@ namespace Nexora.WebApi.Controllers
             _authService = authService;
         }
 
-        [HttpPost("signin")]
-        public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
+        [HttpPost("register/landlords")]
+        public async Task<IActionResult> RegisterLandlord([FromBody] RegisterLandlordDto dto)
         {
-            var response = await _authService.LoginAsync(loginDto);
-            if (response == null) return Unauthorized("Invalid credentials.");
-            return Ok(response);
+            var response = await _authService.RegisterLandlordAsync(dto);
+            if (response == null)
+                return Conflict(new ErrorResponseDto("Conflict", "El correo electrónico ya está registrado."));
+            return StatusCode(201, response);
         }
 
-        [HttpPost("signup")]
-        public async Task<IActionResult> Register([FromBody] RegisterDto registerDto)
+        [HttpPost("register/tenants")]
+        public async Task<IActionResult> RegisterTenant([FromBody] RegisterTenantDto dto)
         {
-            var response = await _authService.RegisterAsync(registerDto);
-            if (response == null) return BadRequest("User already exists or invalid data.");
-            return Ok(response);
+            var response = await _authService.RegisterTenantAsync(dto);
+            if (response == null)
+                return Conflict(new ErrorResponseDto("Conflict", "El correo electrónico ya está registrado o el arrendatario no existe."));
+            return StatusCode(201, response);
+        }
+
+        [HttpPost("login/web")]
+        public async Task<IActionResult> LoginWeb([FromBody] LoginDto loginDto)
+        {
+            try
+            {
+                var response = await _authService.LoginWebAsync(loginDto);
+                if (response == null)
+                    return Unauthorized(new ErrorResponseDto("Unauthorized", "Credenciales inválidas."));
+                return Ok(response);
+            }
+            catch (ForbiddenAccessException ex)
+            {
+                return StatusCode(403, new ErrorResponseDto("Forbidden", ex.Message));
+            }
+        }
+
+        [HttpPost("login/mobile")]
+        public async Task<IActionResult> LoginMobile([FromBody] LoginDto loginDto)
+        {
+            try
+            {
+                var response = await _authService.LoginMobileAsync(loginDto);
+                if (response == null)
+                    return Unauthorized(new ErrorResponseDto("Unauthorized", "Credenciales inválidas."));
+                return Ok(response);
+            }
+            catch (ForbiddenAccessException ex)
+            {
+                return StatusCode(403, new ErrorResponseDto("Forbidden", ex.Message));
+            }
         }
 
         [Authorize]
