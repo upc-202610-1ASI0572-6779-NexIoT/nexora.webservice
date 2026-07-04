@@ -6,6 +6,7 @@ using Nexora.Domain.Entities;
 using Nexora.Domain.Repositories;
 using Nexora.Infrastructure.Persistence;
 using System.Security.Claims;
+using DomainUser = Nexora.Domain.Entities.User;
 
 namespace Nexora.WebApi.Controllers
 {
@@ -16,15 +17,18 @@ namespace Nexora.WebApi.Controllers
     {
         private readonly NexoraDbContext _context;
         private readonly ILandlordRepository _landlordRepository;
+        private readonly ITenantRepository _tenantRepository;
         private readonly IUserRepository _userRepository;
 
         public SettingsController(
             NexoraDbContext context,
             ILandlordRepository landlordRepository,
+            ITenantRepository tenantRepository,
             IUserRepository userRepository)
         {
             _context = context;
             _landlordRepository = landlordRepository;
+            _tenantRepository = tenantRepository;
             _userRepository = userRepository;
         }
 
@@ -37,7 +41,38 @@ namespace Nexora.WebApi.Controllers
             var user = await _userRepository.GetByIdAsync(userId.Value);
             if (user == null) return Unauthorized();
 
-            var landlord = await _landlordRepository.GetByUserIdAsync(userId.Value);
+            var userableType = User.FindFirstValue("userable_type");
+            string firstName = "", lastName = "", country = "", city = "";
+            string? phoneNumber = null;
+
+            if (userableType == "Landlord")
+            {
+                var landlord = await _landlordRepository.GetByUserIdAsync(userId.Value);
+                if (landlord != null)
+                {
+                    firstName = landlord.FirstName;
+                    lastName = landlord.LastName;
+                    country = landlord.Country;
+                    city = landlord.City;
+                    phoneNumber = landlord.PhoneNumber;
+                }
+            }
+            else if (userableType == "Tenant")
+            {
+                var userableIdStr = User.FindFirstValue("userable_id");
+                if (long.TryParse(userableIdStr, out var tenantId))
+                {
+                    var tenant = await _tenantRepository.GetByIdAsync(tenantId);
+                    if (tenant != null)
+                    {
+                        firstName = tenant.FirstName;
+                        lastName = tenant.LastName;
+                        country = tenant.Country;
+                        city = tenant.City;
+                        phoneNumber = tenant.PhoneNumber;
+                    }
+                }
+            }
 
             var prefs = await _context.NotificationPreferences
                 .FirstOrDefaultAsync(n => n.UserId == userId.Value);
@@ -54,12 +89,12 @@ namespace Nexora.WebApi.Controllers
                     PushAlerts: true
                 ),
                 Account: new AccountInfoDto(
-                    FirstName: landlord?.FirstName ?? "",
-                    LastName: landlord?.LastName ?? "",
+                    FirstName: firstName,
+                    LastName: lastName,
                     Email: user.Email,
-                    Country: landlord?.Country ?? "",
-                    City: landlord?.City ?? "",
-                    PhoneNumber: landlord?.PhoneNumber
+                    Country: country,
+                    City: city,
+                    PhoneNumber: phoneNumber
                 ),
                 Security: new SecuritySettingsDto(
                     Is2faActive: false,
