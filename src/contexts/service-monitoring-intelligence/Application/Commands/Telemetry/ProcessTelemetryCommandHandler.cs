@@ -134,6 +134,29 @@ namespace Nexora.Application.Commands.Telemetry
                     await _alertRepository.AddAsync(alert);
                 }
 
+                // 7. Evaluate Water Leak / Waste rule:
+                if (payload.Sensors.WaterLpm > 0.0)
+                {
+                    var flowStart = await _telemetryLogRepository.GetContinuousFlowStartTimeAsync(payload.DeviceId);
+                    DateTime start = flowStart ?? syncDateTime;
+                    double secondsFlowing = (syncDateTime - start).TotalSeconds;
+
+                    if (secondsFlowing >= 15.0)
+                    {
+                        bool hasAlert = await _alertRepository.HasActiveAlertAsync(payload.DeviceId, "Water Leak Detected");
+                        if (!hasAlert)
+                        {
+                            var alert = new Alert(
+                                AlertSeverity.Critical,
+                                "Water Leak Detected",
+                                syncDateTime,
+                                payload.DeviceId
+                            );
+                            await _alertRepository.AddAsync(alert);
+                        }
+                    }
+                }
+
                 // Commit the transaction atomically
                 await _unitOfWork.CommitTransactionAsync();
             }
