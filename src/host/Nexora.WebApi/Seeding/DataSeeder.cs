@@ -660,6 +660,7 @@ namespace Nexora.WebApi.Seeding
                 var devicesToSeed = new[] {
                     (Id: "voltage-safety-unit-apt-402", ConnectionStatus: ConnectionStatus.Online, PropertyId: propBarranco.Id),
                     (Id: "gas-safety-unit-apt-402", ConnectionStatus: ConnectionStatus.Online, PropertyId: propBarranco.Id),
+                    (Id: "water-safety-unit-apt-402", ConnectionStatus: ConnectionStatus.Online, PropertyId: propBarranco.Id),
                     (Id: "safety-gateway-skyline-01", ConnectionStatus: ConnectionStatus.Online, PropertyId: propSkyline.Id),
                     (Id: "safety-gateway-san-isidro-02", ConnectionStatus: ConnectionStatus.Offline, PropertyId: propSanIsidro.Id)
                 };
@@ -678,7 +679,7 @@ namespace Nexora.WebApi.Seeding
             }
 
             // --- 5. Telemetry Logs ---
-            var deviceIds = new[] { "voltage-safety-unit-apt-402", "gas-safety-unit-apt-402", "safety-gateway-skyline-01", "safety-gateway-san-isidro-02" };
+            var deviceIds = new[] { "voltage-safety-unit-apt-402", "gas-safety-unit-apt-402", "water-safety-unit-apt-402", "safety-gateway-skyline-01", "safety-gateway-san-isidro-02" };
             var nowTime = DateTime.UtcNow;
             
             var existingLogs = await _context.TelemetryLogs
@@ -713,6 +714,16 @@ namespace Nexora.WebApi.Seeding
                             "gas-safety-unit-apt-402",
                             0.0,
                             30.0 + rand.NextDouble() * 40.0,
+                            false,
+                            0.0,
+                            true,
+                            timestamp
+                        ));
+
+                        _context.TelemetryLogs.Add(new TelemetryLog(
+                            "water-safety-unit-apt-402",
+                            1.0 + rand.NextDouble() * 3.0,
+                            0.0,
                             false,
                             0.0,
                             true,
