@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Mvc;
 using Nexora.Application.Commands.Property;
 using Nexora.Domain.Enums;
 using Nexora.Infrastructure.Persistence;
-using Nexora.WebApi.DTOs;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
@@ -54,6 +53,13 @@ namespace Nexora.WebApi.Controllers
         [HttpPut("{id}/status")]
         public async Task<IActionResult> UpdateStatus(long id, [FromBody] PropertyStatus status)
         {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            var owned = await _context.Properties
+                .AnyAsync(p => p.Id == id && p.Landlord.UserId == userId);
+            if (!owned) return NotFound();
+
             var command = new UpdatePropertyStatusCommand(id, status);
             var result = await _mediator.Send(command);
             if (!result) return NotFound();
@@ -63,11 +69,15 @@ namespace Nexora.WebApi.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] string? code = null)
         {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
             if (!string.IsNullOrEmpty(code))
             {
                 var property = await _context.Properties
-                    .Where(p => p.PropertyCode == code)
-                    .Select(p => new PropertyDto(
+                    .Where(p => p.PropertyCode == code && p.Landlord.UserId == userId)
+                    .Select(p => new
+                    {
                         p.Id,
                         p.PropertyCode,
                         p.Name,
@@ -79,27 +89,18 @@ namespace Nexora.WebApi.Controllers
                         p.Status,
                         p.IsSecurityModeArmed,
                         p.CreatedAt,
-                        p.UpdatedAt,
-                        new LandlordDto(
-                            p.Landlord.Id,
-                            p.Landlord.UserId,
-                            p.Landlord.FirstName,
-                            p.Landlord.LastName,
-                            p.Landlord.PhoneNumber
-                        )
-                    ))
+                        p.UpdatedAt
+                    })
                     .FirstOrDefaultAsync();
 
                 if (property == null) return NotFound();
                 return Ok(property);
             }
 
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
-
             var properties = await _context.Properties
                 .Where(p => p.Landlord.UserId == userId)
-                .Select(p => new PropertyDto(
+                .Select(p => new
+                {
                     p.Id,
                     p.PropertyCode,
                     p.Name,
@@ -111,15 +112,8 @@ namespace Nexora.WebApi.Controllers
                     p.Status,
                     p.IsSecurityModeArmed,
                     p.CreatedAt,
-                    p.UpdatedAt,
-                    new LandlordDto(
-                        p.Landlord.Id,
-                        p.Landlord.UserId,
-                        p.Landlord.FirstName,
-                        p.Landlord.LastName,
-                        p.Landlord.PhoneNumber
-                    )
-                ))
+                    p.UpdatedAt
+                })
                 .ToListAsync();
 
             return Ok(properties);
@@ -128,9 +122,13 @@ namespace Nexora.WebApi.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(long id)
         {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
             var property = await _context.Properties
-                .Where(p => p.Id == id)
-                .Select(p => new PropertyDto(
+                .Where(p => p.Id == id && p.Landlord.UserId == userId)
+                .Select(p => new
+                {
                     p.Id,
                     p.PropertyCode,
                     p.Name,
@@ -142,15 +140,8 @@ namespace Nexora.WebApi.Controllers
                     p.Status,
                     p.IsSecurityModeArmed,
                     p.CreatedAt,
-                    p.UpdatedAt,
-                    new LandlordDto(
-                        p.Landlord.Id,
-                        p.Landlord.UserId,
-                        p.Landlord.FirstName,
-                        p.Landlord.LastName,
-                        p.Landlord.PhoneNumber
-                    )
-                ))
+                    p.UpdatedAt
+                })
                 .FirstOrDefaultAsync();
 
             if (property == null) return NotFound();
@@ -176,7 +167,7 @@ namespace Nexora.WebApi.Controllers
 
             var count = await _context.Properties.CountAsync(p => 
                 p.Landlord.UserId == userId && 
-                p.Status == PropertyStatus.ACTIVE && // "ACTIVE" means available/empty in this context? 
+                p.Status == PropertyStatus.ACTIVE &&
                 p.IsSecurityModeArmed);
             
             return Ok(new { Count = count });
@@ -185,6 +176,13 @@ namespace Nexora.WebApi.Controllers
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(long id, [FromBody] UpdatePropertyRequest request)
         {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            var owned = await _context.Properties
+                .AnyAsync(p => p.Id == id && p.Landlord.UserId == userId);
+            if (!owned) return NotFound();
+
             var command = new UpdatePropertyCommand(
                 id,
                 request.Name,

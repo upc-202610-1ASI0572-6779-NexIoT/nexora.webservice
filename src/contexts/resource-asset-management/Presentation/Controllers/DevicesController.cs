@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Nexora.Infrastructure.Persistence;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using System.Linq;
 
@@ -22,7 +23,11 @@ namespace Nexora.WebApi.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
             var devices = await _context.Devices
+                .Where(d => d.Property != null && d.Property.Landlord.UserId == userId)
                 .Select(d => new {
                     d.Id,
                     ConnectionStatus = d.ConnectionStatus.ToString(),
