@@ -32,10 +32,13 @@ namespace Nexora.Application.Dto
         long Id,
         string Brand,
         string LastFour,
+        string FullNumber,
         string ExpiryMonth,
         string ExpiryYear,
         string HolderName,
-        string Cvv
+        string Cvv,
+        string FirstName,
+        string LastName
     );
 
     public record InvoiceDto(

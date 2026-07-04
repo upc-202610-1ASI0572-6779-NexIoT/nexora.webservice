@@ -301,6 +301,35 @@ namespace Nexora.WebApi.Controllers
         }
 
         [Authorize]
+        [HttpGet("payment-method")]
+        public async Task<IActionResult> GetPaymentMethod()
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null) return Unauthorized();
+
+            var savedCard = await _context.SavedCards
+                .FirstOrDefaultAsync(c => c.LandlordId == landlord.Id);
+
+            if (savedCard == null)
+                return Ok(new { paymentMethod = (object?)null });
+
+            var dto = new PaymentMethodDto(
+                savedCard.Id,
+                savedCard.Brand,
+                savedCard.LastFour,
+                savedCard.FullNumber,
+                savedCard.ExpiryMonth,
+                savedCard.ExpiryYear,
+                savedCard.HolderName,
+                savedCard.Cvv,
+                landlord.FirstName,
+                landlord.LastName
+            );
+
+            return Ok(new { paymentMethod = dto });
+        }
+
+        [Authorize]
         [HttpGet("payment-methods")]
         public async Task<IActionResult> GetPaymentMethods()
         {
@@ -408,8 +437,43 @@ namespace Nexora.WebApi.Controllers
         }
 
         [Authorize]
+        [HttpPut("payment-method")]
+        public async Task<IActionResult> UpdatePaymentMethod([FromBody] UpdatePaymentMethodRequest request)
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null) return Unauthorized();
+
+            var card = await _context.SavedCards
+                .FirstOrDefaultAsync(c => c.LandlordId == landlord.Id);
+
+            if (card == null) return NotFound();
+
+            card.Update(
+                request.Brand,
+                request.FullNumber,
+                request.ExpiryMonth,
+                request.ExpiryYear,
+                request.HolderName,
+                request.Cvv
+            );
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new PaymentMethodDetailDto(
+                card.Id,
+                card.Brand,
+                card.LastFour,
+                card.FullNumber,
+                card.ExpiryMonth,
+                card.ExpiryYear,
+                card.HolderName,
+                card.Cvv
+            ));
+        }
+
+        [Authorize]
         [HttpPut("payment-methods/{id:long}")]
-        public async Task<IActionResult> UpdatePaymentMethod(long id, [FromBody] UpdatePaymentMethodRequest request)
+        public async Task<IActionResult> UpdatePaymentMethodById(long id, [FromBody] UpdatePaymentMethodRequest request)
         {
             var landlord = await GetLandlordAsync();
             if (landlord == null) return Unauthorized();
