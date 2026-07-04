@@ -41,10 +41,13 @@ namespace Nexora.Infrastructure.Persistence
                 entity.Property(u => u.IsActive).HasColumnName("is_active").HasDefaultValue(true);
                 entity.Property(u => u.FailedLoginAttempts).HasColumnName("failed_login_attempts").HasDefaultValue(0);
                 entity.Property(u => u.LockedAt).HasColumnName("locked_at");
+                entity.Property(u => u.UserableType).HasColumnName("userable_type").HasMaxLength(50);
+                entity.Property(u => u.UserableId).HasColumnName("userable_id");
                 entity.Property(u => u.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
                 entity.Property(u => u.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
 
                 entity.HasIndex(u => u.Email).IsUnique();
+                entity.HasIndex(u => new { u.UserableType, u.UserableId }).HasDatabaseName("IX_users_userable_type_userable_id");
 
                 // Initial users will be seeded at runtime by DataSeeder to allow generated IDs and password hashing.
             });
