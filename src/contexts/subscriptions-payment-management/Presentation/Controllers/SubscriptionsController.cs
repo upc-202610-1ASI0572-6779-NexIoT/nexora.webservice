@@ -339,18 +339,22 @@ namespace Nexora.WebApi.Controllers
             var savedCards = await _context.SavedCards
                 .Where(c => c.LandlordId == landlord.Id)
                 .OrderByDescending(c => c.CreatedAt)
-                .Select(c => new PaymentMethodDto(
-                    c.Id,
-                    c.Brand,
-                    c.LastFour,
-                    c.ExpiryMonth,
-                    c.ExpiryYear,
-                    c.HolderName,
-                    c.Cvv
-                ))
                 .ToListAsync();
 
-            return Ok(new { paymentMethods = savedCards });
+            var dtos = savedCards.Select(c => new PaymentMethodDto(
+                c.Id,
+                c.Brand,
+                c.LastFour,
+                c.FullNumber,
+                c.ExpiryMonth,
+                c.ExpiryYear,
+                c.HolderName,
+                c.Cvv,
+                landlord.FirstName,
+                landlord.LastName
+            )).ToList();
+
+            return Ok(new { paymentMethods = dtos });
         }
 
         [Authorize]
