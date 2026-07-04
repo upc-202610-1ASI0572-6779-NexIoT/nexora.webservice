@@ -2,7 +2,7 @@ namespace Nexora.Application.Dto
 {
     public record LoginDto(string Email, string Password);
 
-    public record RegisterDto(
+    public record RegisterLandlordDto(
         string Email,
         string Password,
         string FirstName,
@@ -13,9 +13,29 @@ namespace Nexora.Application.Dto
         string? PhoneNumber
     );
 
+    public record RegisterTenantDto(
+        string Email,
+        string Password,
+        string FirstName,
+        string LastName,
+        string Country,
+        string City,
+        string Address,
+        string? PhoneNumber,
+        long PropertyId,
+        long? ExistingTenantId = null
+    );
+
     public record AuthResponseDto(
         string Email,
         string Token,
-        long UserId
+        long UserId,
+        string UserableType,
+        long UserableId
+    );
+
+    public record ErrorResponseDto(
+        string Error,
+        string Message
     );
 }
