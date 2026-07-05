@@ -33,9 +33,11 @@ namespace Nexora.Application.Dto
         SecuritySettingsDto Security
     );
 
-    public record UpdatePasswordRequest(string CurrentPassword, string NewPassword);
 
-    public record UpdateNotificationRequest(bool EmailAlerts, bool SmsAlerts, bool PushAlerts);
-
-    public record UpdateLanguageRequest(string LanguageCode);
+    public record UpdateSettingsRequest(
+        string LanguageCode,
+        bool EmailAlerts,
+        bool SmsAlerts,
+        bool PushAlerts
+    );
 }

@@ -10,7 +10,7 @@ using System.Security.Claims;
 namespace Nexora.WebApi.Controllers
 {
     [ApiController]
-    [Route("api/v1/settings")]
+    [Route("api/v1")]
     [Authorize]
     public class SettingsController : ControllerBase
     {
@@ -28,19 +28,19 @@ namespace Nexora.WebApi.Controllers
             _userRepository = userRepository;
         }
 
-        [HttpGet]
-        public async Task<IActionResult> GetSettings()
+        [HttpGet("users/{userId}/settings")]
+        public async Task<IActionResult> GetUserSettings(long userId)
         {
-            var userId = GetUserId();
-            if (userId == null) return Unauthorized();
+            var loggedInUserId = GetUserId();
+            if (loggedInUserId == null || loggedInUserId.Value != userId) return Unauthorized();
 
-            var user = await _userRepository.GetByIdAsync(userId.Value);
+            var user = await _userRepository.GetByIdAsync(userId);
             if (user == null) return Unauthorized();
 
-            var landlord = await _landlordRepository.GetByUserIdAsync(userId.Value);
+            var landlord = await _landlordRepository.GetByUserIdAsync(userId);
 
             var prefs = await _context.NotificationPreferences
-                .FirstOrDefaultAsync(n => n.UserId == userId.Value);
+                .FirstOrDefaultAsync(n => n.UserId == userId);
 
             return Ok(new SystemSettingsResponseDto(
                 Languages: new[]
@@ -68,25 +68,18 @@ namespace Nexora.WebApi.Controllers
             ));
         }
 
-        [HttpPut("language")]
-        public async Task<IActionResult> UpdateLanguage([FromBody] UpdateLanguageRequest request)
+        [HttpPut("users/{userId}/settings")]
+        public async Task<IActionResult> UpdateSettings(long userId, [FromBody] UpdateSettingsRequest request)
         {
-            await Task.CompletedTask;
-            return Ok(new { message = "Language updated successfully." });
-        }
-
-        [HttpPut("notifications")]
-        public async Task<IActionResult> UpdateNotifications([FromBody] UpdateNotificationRequest request)
-        {
-            var userId = GetUserId();
-            if (userId == null) return Unauthorized();
+            var loggedInUserId = GetUserId();
+            if (loggedInUserId == null || loggedInUserId.Value != userId) return Unauthorized();
 
             var prefs = await _context.NotificationPreferences
-                .FirstOrDefaultAsync(n => n.UserId == userId.Value);
+                .FirstOrDefaultAsync(n => n.UserId == userId);
 
             if (prefs == null)
             {
-                prefs = new NotificationPreference(userId.Value, request.EmailAlerts, request.SmsAlerts);
+                prefs = new NotificationPreference(userId, request.EmailAlerts, request.SmsAlerts);
                 _context.NotificationPreferences.Add(prefs);
             }
             else
@@ -95,34 +88,7 @@ namespace Nexora.WebApi.Controllers
             }
 
             await _context.SaveChangesAsync();
-            return Ok(new { message = "Notification preferences updated." });
-        }
-
-        [HttpPut("security/passwords")]
-        public async Task<IActionResult> UpdatePassword([FromBody] UpdatePasswordRequest request)
-        {
-            var userId = GetUserId();
-            if (userId == null) return Unauthorized();
-
-            var user = await _userRepository.GetByIdAsync(userId.Value);
-            if (user == null) return Unauthorized();
-
-            if (!BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.PasswordHash))
-                return BadRequest(new { message = "Current password is incorrect." });
-
-            var newHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
-            user.UpdatePassword(newHash);
-            await _userRepository.UpdateAsync(user);
-            await _context.SaveChangesAsync();
-
-            return Ok(new { message = "Password updated successfully." });
-        }
-
-        [HttpPut("security/two-factor")]
-        public async Task<IActionResult> Toggle2fa([FromBody] Toggle2faRequest request)
-        {
-            await Task.CompletedTask;
-            return Ok(new { is2faActive = request.Enable });
+            return Ok(new { message = "Settings updated successfully." });
         }
 
         private long? GetUserId()
@@ -132,6 +98,4 @@ namespace Nexora.WebApi.Controllers
             return userId;
         }
     }
-
-    public record Toggle2faRequest(bool Enable);
 }
