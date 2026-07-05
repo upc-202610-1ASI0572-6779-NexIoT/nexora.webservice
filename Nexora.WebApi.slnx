@@ -34,4 +34,7 @@
   <Project Path="src/contexts/subscriptions-payment-management/Application/Nexora.Contexts.SubscriptionsPaymentManagement.Application.csproj" />
   <Project Path="src/contexts/subscriptions-payment-management/Infrastructure/Nexora.Contexts.SubscriptionsPaymentManagement.Infrastructure.csproj" />
   <Project Path="src/contexts/subscriptions-payment-management/Presentation/Nexora.Contexts.SubscriptionsPaymentManagement.Presentation.csproj" />
+  
+  <!-- Tests -->
+  <Project Path="src/test/Nexora.WebApi.Tests/Nexora.WebApi.Tests.csproj" />
 </Solution>

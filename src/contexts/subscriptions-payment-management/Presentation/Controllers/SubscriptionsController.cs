@@ -300,7 +300,7 @@ namespace Nexora.WebApi.Controllers
             var now = DateTime.UtcNow;
             var periodEnd = now.AddMonths(1);
 
-            var subscription = new Subscription(landlord.Id, plan.Id, now, periodEnd);
+            var subscription = new LocalSubscription(landlord.Id, plan.Id, now, periodEnd);
 
             await _subscriptionRepository.AddAsync(subscription);
             await _unitOfWork.SaveChangesAsync();
@@ -308,7 +308,7 @@ namespace Nexora.WebApi.Controllers
             var subFromDb = await _subscriptionRepository.GetByIdAsync(subscription.Id);
 
             var dueDate = now.AddDays(7);
-            var invoice = new Invoice(subscription.Id, plan.MonthlyPrice, dueDate);
+            var invoice = new LocalInvoice(subscription.Id, plan.MonthlyPrice, dueDate);
 
             _context.Invoices.Add(invoice);
 
@@ -563,6 +563,8 @@ namespace Nexora.WebApi.Controllers
             var landlord = await GetLandlordAsync();
             if (landlord == null) return Unauthorized();
 
+            var firstName = landlord.FirstName;
+            var lastName = landlord.LastName;
             var savedCards = await _context.SavedCards
                 .Where(c => c.LandlordId == landlord.Id)
                 .OrderByDescending(c => c.CreatedAt)
@@ -570,10 +572,13 @@ namespace Nexora.WebApi.Controllers
                     c.Id,
                     c.Brand,
                     c.LastFour,
+                    c.FullNumber,
                     c.ExpiryMonth,
                     c.ExpiryYear,
                     c.HolderName,
-                    c.Cvv
+                    c.Cvv,
+                    firstName,
+                    lastName
                 ))
                 .ToListAsync();
 
@@ -767,7 +772,7 @@ namespace Nexora.WebApi.Controllers
             return await _landlordRepository.GetByUserIdAsync(userId);
         }
 
-        private static SubscriptionDto MapToDto(Subscription s)
+        private static SubscriptionDto MapToDto(LocalSubscription s)
         {
             return new SubscriptionDto(
                 s.Id,

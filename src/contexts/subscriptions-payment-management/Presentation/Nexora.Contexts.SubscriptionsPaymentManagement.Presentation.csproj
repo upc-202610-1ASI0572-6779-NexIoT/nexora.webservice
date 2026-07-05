@@ -11,4 +11,7 @@
     <ProjectReference Include="..\Application\Nexora.Contexts.SubscriptionsPaymentManagement.Application.csproj" />
     <ProjectReference Include="..\..\..\shared\Nexora.Shared.Infrastructure\Nexora.Shared.Infrastructure.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Stripe.net" Version="52.1.0" />
+  </ItemGroup>
 </Project>

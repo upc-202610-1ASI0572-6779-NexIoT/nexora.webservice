@@ -1,0 +1,215 @@
+using MediatR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Nexora.Application.Commands.Property;
+using Nexora.Domain.Enums;
+using Nexora.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
+
+namespace Nexora.WebApi.Controllers
+{
+    [ApiController]
+    [Route("api/v1/properties")]
+    [Authorize]
+    public class PropertiesController : ControllerBase
+    {
+        private readonly IMediator _mediator;
+        private readonly NexoraDbContext _context;
+
+        public PropertiesController(IMediator mediator, NexoraDbContext context)
+        {
+            _mediator = mediator;
+            _context = context;
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Create([FromBody] CreatePropertyRequest request)
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            try
+            {
+                var command = new CreatePropertyCommand(
+                    request.Name,
+                    request.Description,
+                    request.Type,
+                    request.Country,
+                    request.City,
+                    request.Address,
+                    request.IsSecurityModeArmed,
+                    userId
+                );
+                var id = await _mediator.Send(command);
+                return CreatedAtAction(nameof(GetById), new { id }, id);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        [HttpPatch("{id}/status")]
+        public async Task<IActionResult> UpdateStatus(long id, [FromBody] PropertyStatus status)
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            var owned = await _context.Properties
+                .AnyAsync(p => p.Id == id && p.Landlord.UserId == userId);
+            if (!owned) return NotFound();
+
+            var command = new UpdatePropertyStatusCommand(id, status);
+            var result = await _mediator.Send(command);
+            if (!result) return NotFound();
+            return NoContent();
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetAll([FromQuery] string? code = null)
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            if (!string.IsNullOrEmpty(code))
+            {
+                var property = await _context.Properties
+                    .Where(p => p.PropertyCode == code && p.Landlord.UserId == userId)
+                    .Select(p => new
+                    {
+                        p.Id,
+                        p.PropertyCode,
+                        p.Name,
+                        p.Description,
+                        p.PropertyType,
+                        p.Country,
+                        p.City,
+                        p.Address,
+                        p.Status,
+                        p.IsSecurityModeArmed,
+                        p.CreatedAt,
+                        p.UpdatedAt
+                    })
+                    .FirstOrDefaultAsync();
+
+                if (property == null) return NotFound();
+                return Ok(property);
+            }
+
+            var properties = await _context.Properties
+                .Where(p => p.Landlord.UserId == userId)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.PropertyCode,
+                    p.Name,
+                    p.Description,
+                    p.PropertyType,
+                    p.Country,
+                    p.City,
+                    p.Address,
+                    p.Status,
+                    p.IsSecurityModeArmed,
+                    p.CreatedAt,
+                    p.UpdatedAt
+                })
+                .ToListAsync();
+
+            return Ok(properties);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetById(long id)
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            var property = await _context.Properties
+                .Where(p => p.Id == id && p.Landlord.UserId == userId)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.PropertyCode,
+                    p.Name,
+                    p.Description,
+                    p.PropertyType,
+                    p.Country,
+                    p.City,
+                    p.Address,
+                    p.Status,
+                    p.IsSecurityModeArmed,
+                    p.CreatedAt,
+                    p.UpdatedAt
+                })
+                .FirstOrDefaultAsync();
+
+            if (property == null) return NotFound();
+            return Ok(property);
+        }
+
+        [HttpGet("summary")]
+        public async Task<IActionResult> GetSummary()
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            var total = await _context.Properties
+                .CountAsync(p => p.Landlord.UserId == userId);
+
+            var protectedCount = await _context.Properties.CountAsync(p =>
+                p.Landlord.UserId == userId &&
+                p.Status == PropertyStatus.ACTIVE &&
+                p.IsSecurityModeArmed);
+
+            return Ok(new { Total = total, ProtectedCount = protectedCount });
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Update(long id, [FromBody] UpdatePropertyRequest request)
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            var owned = await _context.Properties
+                .AnyAsync(p => p.Id == id && p.Landlord.UserId == userId);
+            if (!owned) return NotFound();
+
+            var command = new UpdatePropertyCommand(
+                id,
+                request.Name,
+                request.Description,
+                request.Type,
+                request.Country,
+                request.City,
+                request.Address,
+                request.Status,
+                request.IsSecurityModeArmed
+            );
+            var result = await _mediator.Send(command);
+            if (!result) return NotFound();
+            return NoContent();
+        }
+    }
+
+    public record CreatePropertyRequest(
+        string Name, 
+        string? Description,
+        PropertyType Type,
+        string Country,
+        string City,
+        string Address,
+        bool IsSecurityModeArmed
+    );
+
+    public record UpdatePropertyRequest(
+        string Name,
+        string? Description,
+        PropertyType Type,
+        string Country,
+        string City,
+        string Address,
+        PropertyStatus Status,
+        bool IsSecurityModeArmed
+    );
+}

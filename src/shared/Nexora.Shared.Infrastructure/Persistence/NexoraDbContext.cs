@@ -41,10 +41,13 @@ namespace Nexora.Infrastructure.Persistence
                 entity.Property(u => u.IsActive).HasColumnName("is_active").HasDefaultValue(true);
                 entity.Property(u => u.FailedLoginAttempts).HasColumnName("failed_login_attempts").HasDefaultValue(0);
                 entity.Property(u => u.LockedAt).HasColumnName("locked_at");
+                entity.Property(u => u.UserableType).HasColumnName("userable_type").HasMaxLength(50);
+                entity.Property(u => u.UserableId).HasColumnName("userable_id");
                 entity.Property(u => u.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
                 entity.Property(u => u.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
 
                 entity.HasIndex(u => u.Email).IsUnique();
+                entity.HasIndex(u => new { u.UserableType, u.UserableId }).HasDatabaseName("IX_users_userable_type_userable_id");
 
                 // Initial users will be seeded at runtime by DataSeeder to allow generated IDs and password hashing.
             });
@@ -62,6 +65,7 @@ namespace Nexora.Infrastructure.Persistence
                 entity.Property(l => l.City).HasColumnName("city").HasMaxLength(100).IsRequired();
                 entity.Property(l => l.Address).HasColumnName("address").HasMaxLength(255).IsRequired();
                 entity.Property(l => l.PhoneNumber).HasColumnName("phone_number").HasMaxLength(20);
+                entity.Property(l => l.StripeCustomerId).HasColumnName("stripe_customer_id").HasMaxLength(100);
                 entity.Property(l => l.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
                 entity.Property(l => l.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
 
@@ -211,6 +215,7 @@ namespace Nexora.Infrastructure.Persistence
                 entity.Property(s => s.CurrentPeriodEnd).HasColumnName("current_period_end").IsRequired();
                 entity.Property(s => s.CancelAtPeriodEnd).HasColumnName("cancel_at_period_end").HasDefaultValue(false);
                 entity.Property(s => s.CancelledAt).HasColumnName("cancelled_at");
+                entity.Property(s => s.StripeSubscriptionId).HasColumnName("stripe_subscription_id").HasMaxLength(100);
 
                 entity.HasOne(s => s.Landlord)
                     .WithOne()

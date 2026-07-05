@@ -36,17 +36,21 @@ namespace Nexora.Application.Dto
         SubscriptionDto Subscription,
         decimal AmountDue,
         DateTime DueDate,
-        long InvoiceId
+        long InvoiceId,
+        string? ClientSecret = null
     );
 
     public record PaymentMethodDto(
         long Id,
         string Brand,
         string LastFour,
+        string FullNumber,
         string ExpiryMonth,
         string ExpiryYear,
         string HolderName,
-        string Cvv
+        string Cvv,
+        string FirstName,
+        string LastName
     );
 
     public record InvoiceDto(

@@ -9,7 +9,10 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.OpenApi.Models;
+using Stripe;
+
 var builder = WebApplication.CreateBuilder(args);
+StripeConfiguration.ApiKey = builder.Configuration["Stripe:SecretKey"];
 // Add services to the container.
 builder.Services.AddDbContext<NexoraDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -42,10 +45,10 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:5173")
+        policy.AllowAnyOrigin()
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .WithExposedHeaders("Content-Disposition");
+              .WithExposedHeaders("Content-Disposition", "X-Total-Count");
     });
 });
 // Repositories & UoW
@@ -123,6 +126,10 @@ using (var scope = app.Services.CreateScope())
         if (context.Database.GetPendingMigrations().Any())
         {
             context.Database.Migrate();
+        }
+        else
+        {
+            context.Database.EnsureCreated();
         }
 
         // Safety net: backfill any properties that might still have null codes (idempotent)
