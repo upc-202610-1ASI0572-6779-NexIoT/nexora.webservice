@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Nexora.Application.Dto
 {
     public record SubscriptionPlanDto(
@@ -5,8 +7,18 @@ namespace Nexora.Application.Dto
         string Name,
         decimal MonthlyPrice,
         int MaxPropertiesLimit,
-        bool UnlimitedProperties
+        bool UnlimitedProperties,
+        string? Tagline = null,
+        string? Description = null,
+        IReadOnlyList<string>? Features = null,
+        bool IsPopular = false
     );
+
+    /// <summary>Response for creating a Stripe Checkout Session (hosted payment page).</summary>
+    public record CheckoutSessionResponse(string Url, string SessionId);
+
+    /// <summary>Public Stripe configuration needed by the client SDK (flutter_stripe).</summary>
+    public record StripeConfigDto(string PublishableKey);
 
     public record SubscriptionDto(
         long Id,
