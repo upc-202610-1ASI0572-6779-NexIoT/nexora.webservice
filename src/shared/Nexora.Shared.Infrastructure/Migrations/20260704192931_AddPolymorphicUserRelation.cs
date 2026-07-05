@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -27,6 +27,9 @@ namespace Nexora.Infrastructure.Migrations
                 name: "IX_users_userable_type_userable_id",
                 table: "users",
                 columns: new[] { "userable_type", "userable_id" });
+
+            migrationBuilder.Sql("UPDATE users SET userable_type = 'Landlord', userable_id = landlords.id FROM landlords WHERE users.id = landlords.user_id;");
+            migrationBuilder.Sql("UPDATE users SET userable_type = 'Tenant', userable_id = tenants.id FROM tenants WHERE users.id = tenants.user_id;");
         }
 
         /// <inheritdoc />

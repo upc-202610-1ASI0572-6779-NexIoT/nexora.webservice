@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 using Nexora.Application.Dto;
@@ -9,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Nexora.WebApi.Controllers
 {
     [ApiController]
-    [Route("api/v1/telemetries")]
+    [Route("api/v1/telemetry")]
     public class TelemetryController : ControllerBase
     {
         private readonly ITelemetryProcessor _telemetryProcessor;
@@ -34,6 +35,7 @@ namespace Nexora.WebApi.Controllers
             return StatusCode(201); // Created (HTTP 201)
         }
 
+        [Authorize]
         [HttpGet("latest")]
         public async Task<IActionResult> GetLatest([FromQuery] string deviceId)
         {

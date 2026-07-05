@@ -50,7 +50,7 @@ namespace Nexora.WebApi.Controllers
             }
         }
 
-        [HttpPut("{id}/status")]
+        [HttpPatch("{id}/status")]
         public async Task<IActionResult> UpdateStatus(long id, [FromBody] PropertyStatus status)
         {
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -148,29 +148,21 @@ namespace Nexora.WebApi.Controllers
             return Ok(property);
         }
 
-        [HttpGet("stats")]
-        public async Task<IActionResult> GetTotalProperties()
+        [HttpGet("summary")]
+        public async Task<IActionResult> GetSummary()
         {
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
 
             var total = await _context.Properties
                 .CountAsync(p => p.Landlord.UserId == userId);
-            return Ok(new { Total = total });
-        }
 
-        [HttpGet("dashboards")]
-        public async Task<IActionResult> GetEmptyAndProtectedCount()
-        {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
-
-            var count = await _context.Properties.CountAsync(p => 
-                p.Landlord.UserId == userId && 
+            var protectedCount = await _context.Properties.CountAsync(p =>
+                p.Landlord.UserId == userId &&
                 p.Status == PropertyStatus.ACTIVE &&
                 p.IsSecurityModeArmed);
-            
-            return Ok(new { Count = count });
+
+            return Ok(new { Total = total, ProtectedCount = protectedCount });
         }
 
         [HttpPut("{id}")]

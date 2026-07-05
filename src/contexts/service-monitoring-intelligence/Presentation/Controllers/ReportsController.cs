@@ -23,6 +23,7 @@ namespace Nexora.WebApi.Controllers
         /// module. Aggregates real telemetry into a trend series, totals, peak, the
         /// change vs the previous period and a per-device breakdown.
         /// </summary>
+        [Authorize]
         [HttpGet("consumption")]
         public async Task<IActionResult> GetConsumption(
             [FromQuery] string metric = "water",
@@ -40,7 +41,8 @@ namespace Nexora.WebApi.Controllers
             }
         }
 
-        [HttpGet]
+        [Authorize]
+        [HttpGet("telemetry/export")]
         public async Task<IActionResult> ExportReport(
             [FromQuery] string deviceId, 
             [FromQuery] DateTime startDate, 
@@ -97,7 +99,8 @@ namespace Nexora.WebApi.Controllers
             }
         }
 
-        [HttpGet("/api/v1/alerts/reports")]
+        [Authorize]
+        [HttpGet("alerts/export")]
         public async Task<IActionResult> ExportAlertsReport(
             [FromQuery] DateTime? startDate, 
             [FromQuery] DateTime? endDate,
@@ -123,8 +126,8 @@ namespace Nexora.WebApi.Controllers
             }
         }
 
-        [HttpGet("consumption-pdf")]
         [Authorize]
+        [HttpGet("consumption/export")]
         public async Task<IActionResult> ExportConsumptionReport([FromQuery] int months = 6)
         {
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);

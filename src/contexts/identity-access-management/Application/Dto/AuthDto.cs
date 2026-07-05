@@ -1,6 +1,6 @@
 namespace Nexora.Application.Dto
 {
-    public record LoginDto(string Email, string Password);
+    public record LoginDto(string Email, string Password, string Platform = "web");
 
     public record RegisterLandlordDto(
         string Email,

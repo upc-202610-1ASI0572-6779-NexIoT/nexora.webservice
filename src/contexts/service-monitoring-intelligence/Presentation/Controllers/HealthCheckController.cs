@@ -4,7 +4,7 @@ using Nexora.Application.Services;
 namespace Nexora.WebApi.Controllers
 {
     [ApiController]
-    [Route("api/v1/health-checks")]
+    [Route("api/v1/health")]
     public class HealthCheckController : ControllerBase
     {
         private readonly CheckSystemHealthUseCase _healthUseCase;

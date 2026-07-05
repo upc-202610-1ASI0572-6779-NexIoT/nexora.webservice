@@ -116,30 +116,25 @@ namespace Nexora.Application.Services
             return new AuthResponseDto(user.Email, token, user.Id, User.TenantType, tenant.Id);
         }
 
-        public async Task<AuthResponseDto?> LoginWebAsync(LoginDto loginDto)
+        public async Task<AuthResponseDto?> LoginAsync(LoginDto loginDto)
         {
             var user = await _userRepository.GetByEmailAsync(loginDto.Email);
 
             if (user == null || !BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
                 return null;
 
-            if (user.UserableType != User.LandlordType || user.UserableId == null)
-                throw new ForbiddenAccessException("Acceso denegado. Esta plataforma es exclusiva para arrendadores.");
+            var expectedType = loginDto.Platform.Equals("mobile", StringComparison.OrdinalIgnoreCase)
+                ? User.TenantType
+                : User.LandlordType;
 
-            var token = GenerateJwtToken(user);
-
-            return new AuthResponseDto(user.Email, token, user.Id, user.UserableType, user.UserableId.Value);
-        }
-
-        public async Task<AuthResponseDto?> LoginMobileAsync(LoginDto loginDto)
-        {
-            var user = await _userRepository.GetByEmailAsync(loginDto.Email);
-
-            if (user == null || !BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
-                return null;
-
-            if (user.UserableType != User.TenantType || user.UserableId == null)
-                throw new ForbiddenAccessException("Acceso denegado. Esta plataforma es exclusiva para arrendatarios.");
+            if (user.UserableType != expectedType || user.UserableId == null)
+            {
+                var platformName = loginDto.Platform.Equals("mobile", StringComparison.OrdinalIgnoreCase)
+                    ? "arrendatarios"
+                    : "arrendadores";
+                throw new ForbiddenAccessException(
+                    $"Acceso denegado. Esta plataforma es exclusiva para {platformName}.");
+            }
 
             var token = GenerateJwtToken(user);
 

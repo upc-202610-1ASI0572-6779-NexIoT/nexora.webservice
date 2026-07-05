@@ -103,13 +103,6 @@ namespace Nexora.WebApi.Controllers
             ));
         }
 
-        [HttpPut("language")]
-        public async Task<IActionResult> UpdateLanguage([FromBody] UpdateLanguageRequest request)
-        {
-            await Task.CompletedTask;
-            return Ok(new { message = "Language updated successfully." });
-        }
-
         [HttpPut("notifications")]
         public async Task<IActionResult> UpdateNotifications([FromBody] UpdateNotificationRequest request)
         {
@@ -153,13 +146,6 @@ namespace Nexora.WebApi.Controllers
             return Ok(new { message = "Password updated successfully." });
         }
 
-        [HttpPut("security/two-factor")]
-        public async Task<IActionResult> Toggle2fa([FromBody] Toggle2faRequest request)
-        {
-            await Task.CompletedTask;
-            return Ok(new { is2faActive = request.Enable });
-        }
-
         private long? GetUserId()
         {
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -167,6 +153,4 @@ namespace Nexora.WebApi.Controllers
             return userId;
         }
     }
-
-    public record Toggle2faRequest(bool Enable);
 }

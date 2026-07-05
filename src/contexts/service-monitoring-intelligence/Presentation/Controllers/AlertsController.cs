@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 using Nexora.Infrastructure.Persistence;
@@ -11,6 +12,7 @@ namespace Nexora.WebApi.Controllers
 {
     [ApiController]
     [Route("api/v1/alerts")]
+    [Authorize]
     public class AlertsController : ControllerBase
     {
         private readonly NexoraDbContext _context;
@@ -166,7 +168,7 @@ namespace Nexora.WebApi.Controllers
             });
         }
 
-        [HttpPut("{id}/status")]
+        [HttpPut("{id}/tickets/resolve")]
         public async Task<IActionResult> ResolveTicket(long id)
         {
             var alert = await _context.Alerts.FindAsync(id);
@@ -174,11 +176,7 @@ namespace Nexora.WebApi.Controllers
 
             var ticket = await _context.MaintenanceTickets.FirstOrDefaultAsync(t => t.AlertId == id);
             if (ticket == null)
-            {
-                // Create one if it didn't exist, and resolve it
-                ticket = new MaintenanceTicket(id);
-                await _context.MaintenanceTickets.AddAsync(ticket);
-            }
+                return NotFound("No ticket exists for this alert. Create one first via POST alerts/{id}/tickets.");
 
             ticket.Resolve();
             await _context.SaveChangesAsync();

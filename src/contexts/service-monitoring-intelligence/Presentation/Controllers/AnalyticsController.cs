@@ -24,7 +24,7 @@ namespace Nexora.WebApi.Controllers
             _context = context;
         }
 
-        [HttpGet("consumption-summary")]
+        [HttpGet("consumption")]
         public async Task<IActionResult> GetConsumptionSummary([FromQuery] int months = 6)
         {
             if (months <= 0) months = 6;

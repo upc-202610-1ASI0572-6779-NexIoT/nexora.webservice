@@ -75,39 +75,18 @@ namespace Nexora.WebApi.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> GetAll()
+        public async Task<IActionResult> GetAll([FromQuery] long? propertyId = null)
         {
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
 
-            var tenants = await _context.Tenants
-                .Where(t => t.Property.Landlord.UserId == userId)
-                .Select(t => new TenantDto(
-                    t.Id,
-                    t.PropertyId,
-                    t.UserId,
-                    t.FirstName,
-                    t.LastName,
-                    t.Country,
-                    t.City,
-                    t.Address,
-                    t.PhoneNumber,
-                    t.CreatedAt,
-                    t.UpdatedAt
-                ))
-                .ToListAsync();
+            var query = _context.Tenants
+                .Where(t => t.Property.Landlord.UserId == userId);
 
-            return Ok(tenants);
-        }
+            if (propertyId.HasValue)
+                query = query.Where(t => t.PropertyId == propertyId.Value);
 
-        [HttpGet("/api/v1/properties/{propertyId}/tenants")]
-        public async Task<IActionResult> GetByProperty(long propertyId)
-        {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
-
-            var tenants = await _context.Tenants
-                .Where(t => t.PropertyId == propertyId && t.Property.Landlord.UserId == userId)
+            var tenants = await query
                 .Select(t => new TenantDto(
                     t.Id,
                     t.PropertyId,

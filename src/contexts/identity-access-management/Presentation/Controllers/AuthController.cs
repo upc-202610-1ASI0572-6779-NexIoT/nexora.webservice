@@ -35,12 +35,12 @@ namespace Nexora.WebApi.Controllers
             return StatusCode(201, response);
         }
 
-        [HttpPost("login/web")]
-        public async Task<IActionResult> LoginWeb([FromBody] LoginDto loginDto)
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
         {
             try
             {
-                var response = await _authService.LoginWebAsync(loginDto);
+                var response = await _authService.LoginAsync(loginDto);
                 if (response == null)
                     return Unauthorized(new ErrorResponseDto("Unauthorized", "Credenciales inválidas."));
                 return Ok(response);
@@ -48,40 +48,6 @@ namespace Nexora.WebApi.Controllers
             catch (ForbiddenAccessException ex)
             {
                 return StatusCode(403, new ErrorResponseDto("Forbidden", ex.Message));
-            }
-        }
-
-        [HttpPost("login/mobile")]
-        public async Task<IActionResult> LoginMobile([FromBody] LoginDto loginDto)
-        {
-            try
-            {
-                var response = await _authService.LoginMobileAsync(loginDto);
-                if (response == null)
-                    return Unauthorized(new ErrorResponseDto("Unauthorized", "Credenciales inválidas."));
-                return Ok(response);
-            }
-            catch (ForbiddenAccessException ex)
-            {
-                return StatusCode(403, new ErrorResponseDto("Forbidden", ex.Message));
-            }
-        }
-
-        [Authorize]
-        [HttpPost("change-password")]
-        public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
-        {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
-
-            try
-            {
-                await _authService.ChangePasswordAsync(userId, dto.CurrentPassword, dto.NewPassword);
-                return Ok(new { message = "Password changed" });
-            }
-            catch (ApplicationException ex)
-            {
-                return BadRequest(new { code = "INVALID_PASSWORD", message = ex.Message });
             }
         }
     }

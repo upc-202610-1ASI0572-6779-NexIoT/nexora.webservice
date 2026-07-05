@@ -46,6 +46,7 @@ To test webhooks (like checkout completion, invoices payment, and subscription s
 
 1.  **Install the Stripe CLI:**
     *   **macOS (Homebrew):** `brew install stripe/stripe-cli/stripe`
+    *   **Windows (winget - Recommended):** `winget install Stripe.StripeCLI`
     *   **Windows (Scoop):** `scoop bucket add stripe https://github.com/stripe/stripe-cli.git && scoop install stripe`
 2.  **Log in to your Stripe Account:**
     ```bash
