@@ -204,7 +204,8 @@ namespace Nexora.WebApi.Controllers
                 .Select(d => d.Id)
                 .ToListAsync();
 
-            var now = DateTime.UtcNow;
+            var userTimeZone = TimeZoneInfo.FindSystemTimeZoneById("SA Pacific Standard Time");
+            var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, userTimeZone);
             var labels = new List<string>();
             var gasData = new List<double>();
             var electricityData = new List<double>();
@@ -215,11 +216,14 @@ namespace Nexora.WebApi.Controllers
                 // Last 7 days
                 for (int i = 6; i >= 0; i--)
                 {
-                    var date = now.AddDays(-i).Date;
-                    labels.Add(date.ToString("ddd"));
+                    var dateLocal = nowLocal.AddDays(-i).Date;
+                    labels.Add(dateLocal.ToString("ddd"));
+
+                    var dateUtcStart = TimeZoneInfo.ConvertTimeToUtc(dateLocal, userTimeZone);
+                    var dateUtcEnd = dateUtcStart.AddDays(1);
 
                     var dayLogs = await _context.TelemetryLogs
-                        .Where(t => deviceIds.Contains(t.DeviceId) && t.Timestamp.Date == date)
+                        .Where(t => deviceIds.Contains(t.DeviceId) && t.Timestamp >= dateUtcStart && t.Timestamp < dateUtcEnd)
                         .ToListAsync();
 
                     gasData.Add(dayLogs.Any() ? Math.Round(dayLogs.Average(t => t.GasReading), 1) : 0);
@@ -232,14 +236,17 @@ namespace Nexora.WebApi.Controllers
                 // Last 24 hours (grouped in 8 intervals of 3 hours)
                 for (int i = 7; i >= 0; i--)
                 {
-                    var time = now.AddHours(-i * 3);
-                    labels.Add(time.ToString("h tt"));
+                    var timeLocal = nowLocal.AddHours(-i * 3);
+                    labels.Add(timeLocal.ToString("h tt"));
 
-                    var startTime = time.AddHours(-3);
-                    var endTime = time;
+                    var startTimeLocal = timeLocal.AddHours(-3);
+                    var endTimeLocal = timeLocal;
+
+                    var startTimeUtc = TimeZoneInfo.ConvertTimeToUtc(startTimeLocal, userTimeZone);
+                    var endTimeUtc = TimeZoneInfo.ConvertTimeToUtc(endTimeLocal, userTimeZone);
 
                     var intervalLogs = await _context.TelemetryLogs
-                        .Where(t => deviceIds.Contains(t.DeviceId) && t.Timestamp > startTime && t.Timestamp <= endTime)
+                        .Where(t => deviceIds.Contains(t.DeviceId) && t.Timestamp > startTimeUtc && t.Timestamp <= endTimeUtc)
                         .ToListAsync();
 
                     gasData.Add(intervalLogs.Any() ? Math.Round(intervalLogs.Average(t => t.GasReading), 1) : 0);
