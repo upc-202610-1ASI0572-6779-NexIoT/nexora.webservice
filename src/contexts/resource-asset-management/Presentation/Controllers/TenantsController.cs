@@ -6,6 +6,10 @@ using Nexora.Application.Commands.Tenant;
 using Nexora.Application.Dto;
 using Nexora.Infrastructure.Persistence;
 using System.Security.Claims;
+using Nexora.Interface.DTOs;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
 
 namespace Nexora.WebApi.Controllers
 {
@@ -145,7 +149,44 @@ namespace Nexora.WebApi.Controllers
             if (!result) return NotFound();
             return NoContent();
         }
+
+        [HttpPost("link")]
+        public async Task<IActionResult> LinkTenant([FromBody] LinkTenantRequest request)
+        {
+            var userIdString = User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userIdString) || !long.TryParse(userIdString, out var userId))
+            {
+                return Unauthorized();
+            }
+
+            var property = await _context.Properties
+                .Include(p => p.Tenants)
+                .FirstOrDefaultAsync(p => p.PropertyCode == request.PropertyCode);
+
+            if (property == null)
+            {
+                return NotFound("Property code not found.");
+            }
+
+            var tenant = property.Tenants
+                .FirstOrDefault(t => t.UserId == null && t.PhoneNumber == request.PhoneNumber);
+
+            if (tenant == null)
+            {
+                return NotFound("No matching tenant record found for this property.");
+            }
+
+            tenant.LinkUser(userId);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { Message = "Successfully linked to property.", TenantId = tenant.Id });
+        }
     }
+
+    public record LinkTenantRequest(
+        string PropertyCode,
+        string PhoneNumber
+    );
 
     public record UpdateTenantRequest(
         string FirstName,

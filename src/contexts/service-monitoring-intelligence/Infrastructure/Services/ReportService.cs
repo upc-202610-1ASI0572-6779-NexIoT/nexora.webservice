@@ -466,6 +466,10 @@ namespace Nexora.Infrastructure.Services
 
             var deviceIds = devices.Select(d => d.Id).ToList();
 
+            var hasElectricityLinked = devices.Any(d => d.Id.ToLower().Contains("voltage") || d.Id.ToLower().Contains("electricity"));
+            var hasGasLinked = devices.Any(d => d.Id.ToLower().Contains("gas"));
+            var hasWaterLinked = devices.Any(d => d.Id.ToLower().Contains("water") || d.Id.ToLower().Contains("agua"));
+
             var now = DateTime.UtcNow;
             var startPeriod = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(-(months - 1));
 
@@ -476,6 +480,7 @@ namespace Nexora.Infrastructure.Services
             var monthsList = new List<string>();
             var energyValues = new List<double>();
             var gasValues = new List<double>();
+            var waterValues = new List<double>();
 
             for (int i = months - 1; i >= 0; i--)
             {
@@ -489,14 +494,21 @@ namespace Nexora.Infrastructure.Services
 
                 var monthEnergy = monthLogs.Sum(l => l.ElectricityReading) * 10;
                 var monthGas = monthLogs.Sum(l => l.GasReading) * 2;
+                var monthWater = monthLogs.Sum(l => l.WaterReading) * 0.5;
 
                 energyValues.Add(Math.Round(monthEnergy, 0));
                 gasValues.Add(Math.Round(monthGas, 0));
+                waterValues.Add(Math.Round(monthWater, 0));
             }
 
             var currentEnergyVal = energyValues[months - 1];
             var currentGasVal = gasValues[months - 1];
-            var currentCost = (currentEnergyVal * 1.5) + (currentGasVal * 4.0);
+            var currentWaterVal = waterValues[months - 1];
+
+            double currentCost = 0;
+            if (hasElectricityLinked) currentCost += (currentEnergyVal * 1.5);
+            if (hasGasLinked) currentCost += (currentGasVal * 4.0);
+            if (hasWaterLinked) currentCost += (currentWaterVal * 2.0);
 
             var document = Document.Create(container =>
             {
@@ -521,22 +533,30 @@ namespace Nexora.Infrastructure.Services
                             column.Item().Text("Resumen de Consumo Mensual Activo").SemiBold().FontSize(14);
                             column.Item().Table(table =>
                             {
+                                int summaryColsCount = 1;
+                                if (hasElectricityLinked) summaryColsCount++;
+                                if (hasGasLinked) summaryColsCount++;
+                                if (hasWaterLinked) summaryColsCount++;
+
                                 table.ColumnsDefinition(columns =>
                                 {
-                                    columns.RelativeColumn(1);
-                                    columns.RelativeColumn(1);
-                                    columns.RelativeColumn(1);
+                                    for (int col = 0; col < summaryColsCount; col++)
+                                    {
+                                        columns.RelativeColumn(1);
+                                    }
                                 });
 
                                 table.Header(header =>
                                 {
-                                    header.Cell().BorderBottom(1).Padding(5).Text("Energia Total (kWh)").Bold();
-                                    header.Cell().BorderBottom(1).Padding(5).Text("Gas Total (m3)").Bold();
+                                    if (hasElectricityLinked) header.Cell().BorderBottom(1).Padding(5).Text("Energia Total (kWh)").Bold();
+                                    if (hasGasLinked) header.Cell().BorderBottom(1).Padding(5).Text("Gas Total (m3)").Bold();
+                                    if (hasWaterLinked) header.Cell().BorderBottom(1).Padding(5).Text("Agua Total (m3)").Bold();
                                     header.Cell().BorderBottom(1).Padding(5).Text("Costo Proyectado ($)").Bold();
                                 });
 
-                                table.Cell().Padding(5).Text($"{currentEnergyVal:N0}");
-                                table.Cell().Padding(5).Text($"{currentGasVal:N0}");
+                                if (hasElectricityLinked) table.Cell().Padding(5).Text($"{currentEnergyVal:N0}");
+                                if (hasGasLinked) table.Cell().Padding(5).Text($"{currentGasVal:N0}");
+                                if (hasWaterLinked) table.Cell().Padding(5).Text($"{currentWaterVal:N0}");
                                 table.Cell().Padding(5).Text($"${currentCost:N2}");
                             });
 
@@ -544,25 +564,33 @@ namespace Nexora.Infrastructure.Services
                             column.Item().Text("Historial de Consumo por Mes").SemiBold().FontSize(14);
                             column.Item().Table(table =>
                             {
+                                int breakdownColsCount = 1;
+                                if (hasElectricityLinked) breakdownColsCount++;
+                                if (hasGasLinked) breakdownColsCount++;
+                                if (hasWaterLinked) breakdownColsCount++;
+
                                 table.ColumnsDefinition(columns =>
                                 {
-                                    columns.RelativeColumn(1);
-                                    columns.RelativeColumn(1);
-                                    columns.RelativeColumn(1);
+                                    for (int col = 0; col < breakdownColsCount; col++)
+                                    {
+                                        columns.RelativeColumn(1);
+                                    }
                                 });
 
                                 table.Header(header =>
                                 {
                                     header.Cell().BorderBottom(1).Padding(5).Text("Mes").Bold();
-                                    header.Cell().BorderBottom(1).Padding(5).Text("Energia (kWh)").Bold();
-                                    header.Cell().BorderBottom(1).Padding(5).Text("Gas (m3)").Bold();
+                                    if (hasElectricityLinked) header.Cell().BorderBottom(1).Padding(5).Text("Energia (kWh)").Bold();
+                                    if (hasGasLinked) header.Cell().BorderBottom(1).Padding(5).Text("Gas (m3)").Bold();
+                                    if (hasWaterLinked) header.Cell().BorderBottom(1).Padding(5).Text("Agua (m3)").Bold();
                                 });
 
                                 for (int idx = 0; idx < months; idx++)
                                 {
                                     table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text(monthsList[idx]);
-                                    table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{energyValues[idx]:N0}");
-                                    table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{gasValues[idx]:N0}");
+                                    if (hasElectricityLinked) table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{energyValues[idx]:N0}");
+                                    if (hasGasLinked) table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{gasValues[idx]:N0}");
+                                    if (hasWaterLinked) table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{waterValues[idx]:N0}");
                                 }
                             });
 
@@ -574,8 +602,9 @@ namespace Nexora.Infrastructure.Services
                                 {
                                     columns.RelativeColumn(3);
                                     columns.RelativeColumn(2);
-                                    columns.RelativeColumn(2);
-                                    columns.RelativeColumn(2);
+                                    if (hasElectricityLinked) columns.RelativeColumn(2);
+                                    if (hasGasLinked) columns.RelativeColumn(2);
+                                    if (hasWaterLinked) columns.RelativeColumn(2);
                                     columns.RelativeColumn(2);
                                 });
 
@@ -583,8 +612,9 @@ namespace Nexora.Infrastructure.Services
                                 {
                                     header.Cell().BorderBottom(1).Padding(5).Text("Propiedad").Bold();
                                     header.Cell().BorderBottom(1).Padding(5).Text("Ubicacion").Bold();
-                                    header.Cell().BorderBottom(1).Padding(5).Text("Energia (kWh)").Bold();
-                                    header.Cell().BorderBottom(1).Padding(5).Text("Gas (m3)").Bold();
+                                    if (hasElectricityLinked) header.Cell().BorderBottom(1).Padding(5).Text("Energia (kWh)").Bold();
+                                    if (hasGasLinked) header.Cell().BorderBottom(1).Padding(5).Text("Gas (m3)").Bold();
+                                    if (hasWaterLinked) header.Cell().BorderBottom(1).Padding(5).Text("Agua (m3)").Bold();
                                     header.Cell().BorderBottom(1).Padding(5).Text("Estado").Bold();
                                 });
 
@@ -597,21 +627,23 @@ namespace Nexora.Infrastructure.Services
 
                                     var propEnergy = Math.Round(propLogs.Sum(l => l.ElectricityReading) * 10, 0);
                                     var propGas = Math.Round(propLogs.Sum(l => l.GasReading) * 2, 0);
+                                    var propWater = Math.Round(propLogs.Sum(l => l.WaterReading) * 0.5, 0);
 
                                     string status = "optimal";
-                                    if (propEnergy > 1500 || propGas > 400)
+                                    if (propEnergy > 1500 || propGas > 400 || propWater > 300)
                                     {
                                         status = "high-load";
                                     }
-                                    else if (propEnergy > 800 || propGas > 200)
+                                    else if (propEnergy > 800 || propGas > 200 || propWater > 150)
                                     {
                                         status = "monitor";
                                     }
 
                                     table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text(prop.Name);
                                     table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{prop.City}, {prop.Country}");
-                                    table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{propEnergy:N0}");
-                                    table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{propGas:N0}");
+                                    if (hasElectricityLinked) table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{propEnergy:N0}");
+                                    if (hasGasLinked) table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{propGas:N0}");
+                                    if (hasWaterLinked) table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text($"{propWater:N0}");
                                     table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten3).Padding(5).Text(status.ToUpper());
                                 }
                             });

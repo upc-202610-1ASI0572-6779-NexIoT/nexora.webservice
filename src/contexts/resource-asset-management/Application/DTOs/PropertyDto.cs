@@ -18,6 +18,7 @@ namespace Nexora.WebApi.DTOs
         bool IsSecurityModeArmed,
         DateTime CreatedAt,
         DateTime UpdatedAt,
-        LandlordDto Landlord
+        LandlordDto Landlord,
+        int? HealthScore
     );
 }

@@ -11,6 +11,10 @@ namespace Nexora.Application.Dto
         [Required(ErrorMessage = "Timestamp is required.")]
         public long Timestamp { get; set; } // Unix epoch
 
+        public int? Rssi { get; set; }
+
+        public string? FirmwareVersion { get; set; }
+
         [Required(ErrorMessage = "Sensors data block is required.")]
         public SensorDataDto Sensors { get; set; } = null!;
     }

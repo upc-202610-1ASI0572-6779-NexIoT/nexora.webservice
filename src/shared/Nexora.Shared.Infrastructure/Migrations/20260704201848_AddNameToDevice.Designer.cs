@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Nexora.Infrastructure.Persistence;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Nexora.Infrastructure.Migrations
 {
     [DbContext(typeof(NexoraDbContext))]
-    partial class NexoraDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260704201848_AddNameToDevice")]
+    partial class AddNameToDevice
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -62,11 +65,6 @@ namespace Nexora.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("FirmwareVersion")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("firmware_version");
-
                     b.Property<DateTime>("LastSyncAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -80,10 +78,6 @@ namespace Nexora.Infrastructure.Migrations
 
                     b.Property<long?>("PropertyId")
                         .HasColumnType("bigint");
-
-                    b.Property<int?>("Rssi")
-                        .HasColumnType("integer")
-                        .HasColumnName("rssi");
 
                     b.HasKey("Id");
 
@@ -184,11 +178,6 @@ namespace Nexora.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("phone_number");
-
-                    b.Property<string>("StripeCustomerId")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("stripe_customer_id");
 
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()
@@ -522,11 +511,6 @@ namespace Nexora.Infrastructure.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("status");
 
-                    b.Property<string>("StripeSubscriptionId")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("stripe_subscription_id");
-
                     b.Property<long>("SubscriptionPlanId")
                         .HasColumnType("bigint")
                         .HasColumnName("subscription_plan_id");
@@ -782,22 +766,10 @@ namespace Nexora.Infrastructure.Migrations
                         .HasColumnName("updated_at")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
-                    b.Property<long?>("UserableId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("userable_id");
-
-                    b.Property<string>("UserableType")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("userable_type");
-
                     b.HasKey("Id");
 
                     b.HasIndex("Email")
                         .IsUnique();
-
-                    b.HasIndex("UserableType", "UserableId")
-                        .HasDatabaseName("IX_users_userable_type_userable_id");
 
                     b.ToTable("users", (string)null);
                 });

@@ -130,6 +130,12 @@ namespace Nexora.Infrastructure.Persistence
                 entity.HasKey(d => d.Id);
                 entity.Property(d => d.Id).HasMaxLength(100);
 
+                entity.Property(d => d.MacAddress).HasMaxLength(100);
+                entity.Property(d => d.Name).HasMaxLength(150);
+                entity.Property(d => d.Rssi).HasColumnName("rssi");
+                entity.Property(d => d.FirmwareVersion).HasColumnName("firmware_version").HasMaxLength(50);
+                entity.HasIndex(d => d.MacAddress).IsUnique();
+
                 entity.Property(d => d.ConnectionStatus)
                     .HasConversion<string>()
                     .HasColumnType("text")

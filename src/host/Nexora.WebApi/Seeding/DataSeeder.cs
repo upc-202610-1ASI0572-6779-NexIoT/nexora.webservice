@@ -335,16 +335,16 @@ namespace Nexora.WebApi.Seeding
             var properties = await _context.Properties.OrderBy(p => p.Id).ToListAsync();
             if (properties.Count == 0) return;
 
-            // ── Devices ──────────────────────────────────────────────
+            // ── Devices (Integrados con campos reales de RSSI, MAC y Firmware) ──
             var deviceDefs = new[]
             {
-                (Id: "water-safety-unit-apt-402", PropertyIdx: 0, ConnectionStatus: ConnectionStatus.Online),
-                (Id: "voltage-safety-unit-apt-402", PropertyIdx: 0, ConnectionStatus: ConnectionStatus.Online),
-                (Id: "gas-safety-unit-apt-402", PropertyIdx: 0, ConnectionStatus: ConnectionStatus.Online),
-                (Id: "safety-gateway-skyline-01", PropertyIdx: 4, ConnectionStatus: ConnectionStatus.Online),
-                (Id: "safety-gateway-san-isidro-02", PropertyIdx: 3, ConnectionStatus: ConnectionStatus.Offline),
-                (Id: "security-cam-condesa-01", PropertyIdx: 5, ConnectionStatus: ConnectionStatus.Online),
-                (Id: "sensor-puerta-magdalena-01", PropertyIdx: 2, ConnectionStatus: ConnectionStatus.Online),
+                (Id: "water-safety-unit-apt-402", PropertyIdx: 0, ConnectionStatus: ConnectionStatus.Online, Mac: "00:1A:2B:3C:4D:60", Name: "water-safety-unit-apt-402", Rssi: -62, Firmware: "v2.4.1"),
+                (Id: "voltage-safety-unit-apt-402", PropertyIdx: 0, ConnectionStatus: ConnectionStatus.Online, Mac: "00:1A:2B:3C:4D:5E", Name: "voltage-safety-unit-apt-402", Rssi: -68, Firmware: "v2.4.1"),
+                (Id: "gas-safety-unit-apt-402", PropertyIdx: 0, ConnectionStatus: ConnectionStatus.Online, Mac: "00:1A:2B:3C:4D:5F", Name: "gas-safety-unit-apt-402", Rssi: -55, Firmware: "v2.4.1"),
+                (Id: "safety-gateway-skyline-01", PropertyIdx: 4, ConnectionStatus: ConnectionStatus.Online, Mac: "00:1A:2B:3C:4D:61", Name: "safety-gateway-skyline-01", Rssi: -50, Firmware: "v2.4.1"),
+                (Id: "safety-gateway-san-isidro-02", PropertyIdx: 3, ConnectionStatus: ConnectionStatus.Offline, Mac: "00:1A:2B:3C:4D:62", Name: "safety-gateway-san-isidro-02", Rssi: -85, Firmware: "v2.3.5"),
+                (Id: "security-cam-condesa-01", PropertyIdx: 5, ConnectionStatus: ConnectionStatus.Online, Mac: "00:1A:2B:3C:4D:63", Name: "security-cam-condesa-01", Rssi: -60, Firmware: "v2.4.1"),
+                (Id: "sensor-puerta-magdalena-01", PropertyIdx: 2, ConnectionStatus: ConnectionStatus.Online, Mac: "00:1A:2B:3C:4D:64", Name: "sensor-puerta-magdalena-01", Rssi: -70, Firmware: "v2.4.1"),
             };
 
             var now = DateTime.UtcNow;
@@ -354,8 +354,17 @@ namespace Nexora.WebApi.Seeding
                 var existing = await _context.Devices.FindAsync(def.Id);
                 if (existing == null)
                 {
-                    existing = new Device(def.Id, def.ConnectionStatus, now.AddMinutes(-10));
+                    existing = new Device(def.Id, def.ConnectionStatus, now.AddMinutes(-10), def.Mac, def.Name, def.Rssi, def.Firmware);
                     _context.Devices.Add(existing);
+                }
+                else
+                {
+                    existing.UpdateSync(def.ConnectionStatus, now.AddMinutes(-10));
+                    existing.UpdateMacAddress(def.Mac);
+                    existing.UpdateName(def.Name);
+                    existing.UpdateRssi(def.Rssi);
+                    existing.UpdateFirmwareVersion(def.Firmware);
+                    _context.Devices.Update(existing);
                 }
                 existing.AssignToProperty(properties[def.PropertyIdx].Id);
             }

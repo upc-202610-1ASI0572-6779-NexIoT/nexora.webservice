@@ -49,12 +49,22 @@ namespace Nexora.Application.Commands.Telemetry
                 var device = await _deviceRepository.GetByIdAsync(payload.DeviceId);
                 if (device == null)
                 {
-                    device = new Device(payload.DeviceId, ConnectionStatus.Online, syncDateTime);
+                    device = new Device(payload.DeviceId, ConnectionStatus.Online, syncDateTime, 
+                        rssi: payload.Rssi ?? -60, 
+                        firmwareVersion: payload.FirmwareVersion ?? "v2.4.1");
                     await _deviceRepository.AddAsync(device);
                 }
                 else
                 {
                     device.UpdateSync(ConnectionStatus.Online, syncDateTime);
+                    if (payload.Rssi.HasValue)
+                    {
+                        device.UpdateRssi(payload.Rssi.Value);
+                    }
+                    if (!string.IsNullOrWhiteSpace(payload.FirmwareVersion))
+                    {
+                        device.UpdateFirmwareVersion(payload.FirmwareVersion);
+                    }
                     await _deviceRepository.UpdateAsync(device);
                 }
 
@@ -132,6 +142,41 @@ namespace Nexora.Application.Commands.Telemetry
                         payload.DeviceId
                     );
                     await _alertRepository.AddAsync(alert);
+                }
+
+                // 7. Evaluate Water Leak / Waste rule:
+                if (payload.Sensors.WaterLpm > 0.0)
+                {
+                    bool shouldAlert = false;
+                    if (payload.Sensors.WaterLpm > 20.0)
+                    {
+                        shouldAlert = true;
+                    }
+                    else
+                    {
+                        var flowStart = await _telemetryLogRepository.GetContinuousFlowStartTimeAsync(payload.DeviceId);
+                        DateTime start = flowStart ?? syncDateTime;
+                        double secondsFlowing = (syncDateTime - start).TotalSeconds;
+                        if (secondsFlowing >= 900.0) // 15 minutes
+                        {
+                            shouldAlert = true;
+                        }
+                    }
+
+                    if (shouldAlert)
+                    {
+                        bool hasAlert = await _alertRepository.HasActiveAlertAsync(payload.DeviceId, "Water Leak Detected");
+                        if (!hasAlert)
+                        {
+                            var alert = new Alert(
+                                AlertSeverity.Critical,
+                                "Water Leak Detected",
+                                syncDateTime,
+                                payload.DeviceId
+                            );
+                            await _alertRepository.AddAsync(alert);
+                        }
+                    }
                 }
 
                 // Commit the transaction atomically

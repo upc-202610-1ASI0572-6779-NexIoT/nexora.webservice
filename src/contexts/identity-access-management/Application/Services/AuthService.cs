@@ -139,6 +139,7 @@ namespace Nexora.Application.Services
             var token = GenerateJwtToken(user);
 
             return new AuthResponseDto(user.Email, token, user.Id, user.UserableType, user.UserableId.Value);
+
         }
 
         public async Task ChangePasswordAsync(

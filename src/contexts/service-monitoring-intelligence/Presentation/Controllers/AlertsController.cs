@@ -7,6 +7,8 @@ using Microsoft.EntityFrameworkCore;
 using Nexora.Domain.Entities;
 using Nexora.Domain.Enums;
 using System;
+using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace Nexora.WebApi.Controllers
 {
@@ -32,7 +34,26 @@ namespace Nexora.WebApi.Controllers
             if (page < 1) page = 1;
             if (pageSize < 1) pageSize = 10;
 
-            var query = _context.Alerts.AsQueryable();
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userIdString) || !long.TryParse(userIdString, out var userId))
+            {
+                return Unauthorized();
+            }
+
+            var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
+            if (landlord == null) return NotFound("Landlord profile not found.");
+
+            var propertyIds = await _context.Properties
+                .Where(p => p.LandlordId == landlord.Id)
+                .Select(p => p.Id)
+                .ToListAsync();
+
+            var deviceIds = await _context.Devices
+                .Where(d => d.PropertyId != null && propertyIds.Contains(d.PropertyId.Value))
+                .Select(d => d.Id)
+                .ToListAsync();
+
+            var query = _context.Alerts.Where(a => deviceIds.Contains(a.DeviceId));
 
             if (!string.IsNullOrEmpty(severity))
             {
@@ -68,7 +89,8 @@ namespace Nexora.WebApi.Controllers
                         .OrderByDescending(t => t.Timestamp)
                         .Select(t => a.Type.Contains("Gas") ? t.GasReading : 
                                      a.Type.Contains("Overcurrent") ? t.ElectricityReading : 
-                                     a.Type.Contains("Voltage") ? (t.VoltageOk ? 1.0 : 0.0) : 0.0)
+                                     a.Type.Contains("Voltage") ? (t.VoltageOk ? 1.0 : 0.0) :
+                                     a.Type.Contains("Water") ? t.WaterReading : 0.0)
                         .FirstOrDefault()
                 })
                 .ToListAsync();
@@ -101,9 +123,9 @@ namespace Nexora.WebApi.Controllers
                 })
                 .FirstOrDefaultAsync();
 
-            // Also get the latest 10 telemetry readings for this device to show historical context
+            // Also get the latest 10 telemetry readings for this device to show historical context (at or before the alert timestamp)
             var recentTelemetry = await _context.TelemetryLogs
-                .Where(t => t.DeviceId == alert.DeviceId)
+                .Where(t => t.DeviceId == alert.DeviceId && t.Timestamp <= alert.Timestamp)
                 .OrderByDescending(t => t.Timestamp)
                 .Take(10)
                 .Select(t => new {
