@@ -28,8 +28,6 @@ namespace Nexora.WebApi.Seeding
 
         public async Task EnsureSeedDataAsync()
         {
-            if (await _context.Users.AnyAsync()) return;
-
             await SeedLandlordUsersAsync();
             await SeedPropertiesAsync();
             await SeedGuestTenantsAsync();
@@ -52,7 +50,10 @@ namespace Nexora.WebApi.Seeding
 
             foreach (var u in landlords)
             {
-                await _authService.RegisterLandlordAsync(u);
+                if (!await _context.Users.AnyAsync(x => x.Email == u.Email))
+                {
+                    await _authService.RegisterLandlordAsync(u);
+                }
             }
         }
 
@@ -72,6 +73,8 @@ namespace Nexora.WebApi.Seeding
 
             foreach (var p in properties)
             {
+                if (await _context.Properties.AnyAsync(x => x.Name == p.Name)) continue;
+
                 var user = await _context.Users.FirstOrDefaultAsync(x => x.Email == p.OwnerEmail);
                 if (user == null) continue;
 
@@ -84,8 +87,6 @@ namespace Nexora.WebApi.Seeding
 
         private async Task SeedGuestTenantsAsync()
         {
-            if (await _context.Tenants.AnyAsync()) return;
-
             var properties = await _context.Properties.OrderBy(p => p.Id).ToListAsync();
             if (properties.Count < 8) return;
 
@@ -110,6 +111,8 @@ namespace Nexora.WebApi.Seeding
                 var property = properties[index];
                 foreach (var g in guests)
                 {
+                    if (await _context.Tenants.AnyAsync(x => x.PhoneNumber == g.Phone)) continue;
+
                     var tenant = new Tenant(property.Id, g.FirstName, g.LastName, g.Country, g.City, g.Address, g.Phone);
                     _context.Tenants.Add(tenant);
                 }
@@ -132,7 +135,10 @@ namespace Nexora.WebApi.Seeding
 
             foreach (var t in tenantUsers)
             {
-                await _authService.RegisterTenantAsync(t);
+                if (!await _context.Users.AnyAsync(x => x.Email == t.Email))
+                {
+                    await _authService.RegisterTenantAsync(t);
+                }
             }
         }
 
