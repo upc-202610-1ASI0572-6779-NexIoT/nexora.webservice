@@ -128,8 +128,37 @@ namespace Nexora.WebApi.Controllers
         {
             if (string.IsNullOrWhiteSpace(request.Id)) return BadRequest("Device ID is required.");
             
-            var existing = await _context.Devices.AnyAsync(d => d.Id == request.Id);
-            if (existing) return BadRequest("Device with this serial number is already registered.");
+            var existing = await _context.Devices.FirstOrDefaultAsync(d => d.Id == request.Id);
+            if (existing != null)
+            {
+                if (existing.PropertyId != null)
+                {
+                    return BadRequest("Device with this serial number is already registered to another property.");
+                }
+
+                // If the device exists in the pool but is unassigned, allow claiming it by assigning it to the property
+                if (request.PropertyId.HasValue)
+                {
+                    var propertyExists = await _context.Properties.AnyAsync(p => p.Id == request.PropertyId.Value);
+                    if (!propertyExists) return BadRequest("Target property not found.");
+                    existing.AssignToProperty(request.PropertyId.Value);
+                }
+
+                if (!string.IsNullOrWhiteSpace(request.Name))
+                {
+                    existing.UpdateName(request.Name);
+                }
+
+                if (!string.IsNullOrWhiteSpace(request.MacAddress))
+                {
+                    var existingMac = await _context.Devices.AnyAsync(d => d.MacAddress == request.MacAddress && d.Id != existing.Id);
+                    if (existingMac) return BadRequest("Device with this MAC Address is already registered.");
+                    existing.UpdateMacAddress(request.MacAddress);
+                }
+
+                await _context.SaveChangesAsync();
+                return Ok(existing);
+            }
 
             if (!string.IsNullOrWhiteSpace(request.MacAddress))
             {

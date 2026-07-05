@@ -91,8 +91,36 @@ namespace Nexora.WebApi.Seeding
 
             await SeedTenantDataAsync();
             await SeedSubscriptionDataAsync();
-            await SeedTelemetryDataAsync();
-            await SeedDeveloperDataAsync();
+
+            // Clear existing telemetries, alerts, and tickets to ensure historical data starts empty
+            _context.TelemetryLogs.RemoveRange(_context.TelemetryLogs);
+            _context.Alerts.RemoveRange(_context.Alerts);
+            _context.MaintenanceTickets.RemoveRange(_context.MaintenanceTickets);
+            await _context.SaveChangesAsync();
+
+            // Seed devices as unassigned so the user can link them manually
+            await SeedUnassignedDevicesAsync();
+        }
+
+        private async Task SeedUnassignedDevicesAsync()
+        {
+            var deviceIds = new[] { "voltage-safety-unit-apt-402", "gas-safety-unit-apt-402", "water-safety-unit-apt-402" };
+            foreach (var id in deviceIds)
+            {
+                var device = await _context.Devices.FindAsync(id);
+                if (device == null)
+                {
+                    device = new Device(id, ConnectionStatus.Online, DateTime.UtcNow);
+                    await _context.Devices.AddAsync(device);
+                }
+                else
+                {
+                    device.AssignToProperty(null);
+                    device.UpdateSync(ConnectionStatus.Online, DateTime.UtcNow);
+                    _context.Devices.Update(device);
+                }
+            }
+            await _context.SaveChangesAsync();
         }
 
         /// <summary>

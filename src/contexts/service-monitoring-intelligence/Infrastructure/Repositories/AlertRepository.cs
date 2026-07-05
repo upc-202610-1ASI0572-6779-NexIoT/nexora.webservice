@@ -26,7 +26,8 @@ namespace Nexora.Infrastructure.Repositories
         {
             var oneMinuteAgo = DateTime.UtcNow.AddMinutes(-1);
             return await _context.Alerts
-                .AnyAsync(a => a.DeviceId == deviceId && a.Type == type && a.Timestamp >= oneMinuteAgo);
+                .AnyAsync(a => a.DeviceId == deviceId && a.Type == type && a.Timestamp >= oneMinuteAgo
+                    && !_context.MaintenanceTickets.Any(t => t.AlertId == a.Id && t.Status == Nexora.Domain.Enums.TicketStatus.Resolved));
         }
     }
 }
