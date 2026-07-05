@@ -49,14 +49,22 @@ namespace Nexora.Application.Commands.Telemetry
                 var device = await _deviceRepository.GetByIdAsync(payload.DeviceId);
                 if (device == null)
                 {
-                    device = new Device(payload.DeviceId, ConnectionStatus.Online, syncDateTime, rssi: payload.Rssi, firmwareVersion: payload.FirmwareVersion);
+                    device = new Device(payload.DeviceId, ConnectionStatus.Online, syncDateTime, 
+                        rssi: payload.Rssi ?? -60, 
+                        firmwareVersion: payload.FirmwareVersion ?? "v2.4.1");
                     await _deviceRepository.AddAsync(device);
                 }
                 else
                 {
                     device.UpdateSync(ConnectionStatus.Online, syncDateTime);
-                    device.UpdateRssi(payload.Rssi);
-                    device.UpdateFirmwareVersion(payload.FirmwareVersion);
+                    if (payload.Rssi.HasValue)
+                    {
+                        device.UpdateRssi(payload.Rssi.Value);
+                    }
+                    if (!string.IsNullOrWhiteSpace(payload.FirmwareVersion))
+                    {
+                        device.UpdateFirmwareVersion(payload.FirmwareVersion);
+                    }
                     await _deviceRepository.UpdateAsync(device);
                 }
 

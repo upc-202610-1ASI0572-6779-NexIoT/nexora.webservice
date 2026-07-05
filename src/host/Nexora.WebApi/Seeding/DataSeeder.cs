@@ -104,19 +104,28 @@ namespace Nexora.WebApi.Seeding
 
         private async Task SeedUnassignedDevicesAsync()
         {
-            var deviceIds = new[] { "voltage-safety-unit-apt-402", "gas-safety-unit-apt-402", "water-safety-unit-apt-402" };
-            foreach (var id in deviceIds)
+            var deviceSpecs = new[] {
+                (Id: "voltage-safety-unit-apt-402", Mac: "00:1A:2B:3C:4D:5E", Name: "voltage-safety-unit-apt-402", Rssi: -68, Firmware: "v2.4.1"),
+                (Id: "gas-safety-unit-apt-402", Mac: "00:1A:2B:3C:4D:5F", Name: "gas-safety-unit-apt-402", Rssi: -55, Firmware: "v2.4.1"),
+                (Id: "water-safety-unit-apt-402", Mac: "00:1A:2B:3C:4D:60", Name: "water-safety-unit-apt-402", Rssi: -62, Firmware: "v2.4.1")
+            };
+
+            foreach (var spec in deviceSpecs)
             {
-                var device = await _context.Devices.FindAsync(id);
+                var device = await _context.Devices.FindAsync(spec.Id);
                 if (device == null)
                 {
-                    device = new Device(id, ConnectionStatus.Online, DateTime.UtcNow);
+                    device = new Device(spec.Id, ConnectionStatus.Online, DateTime.UtcNow, spec.Mac, spec.Name, spec.Rssi, spec.Firmware);
                     await _context.Devices.AddAsync(device);
                 }
                 else
                 {
                     device.AssignToProperty(null);
                     device.UpdateSync(ConnectionStatus.Online, DateTime.UtcNow);
+                    device.UpdateMacAddress(spec.Mac);
+                    device.UpdateName(spec.Name);
+                    device.UpdateRssi(spec.Rssi);
+                    device.UpdateFirmwareVersion(spec.Firmware);
                     _context.Devices.Update(device);
                 }
             }
