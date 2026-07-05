@@ -40,4 +40,14 @@ namespace Nexora.Application.Dto
         bool SmsAlerts,
         bool PushAlerts
     );
+
+    public record UpdateNotificationRequest(
+        bool EmailAlerts,
+        bool SmsAlerts
+    );
+
+    public record UpdatePasswordRequest(
+        string CurrentPassword,
+        string NewPassword
+    );
 }

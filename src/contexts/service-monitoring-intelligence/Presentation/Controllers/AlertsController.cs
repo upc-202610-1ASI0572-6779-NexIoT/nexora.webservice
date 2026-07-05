@@ -29,7 +29,8 @@ namespace Nexora.WebApi.Controllers
             [FromQuery] int page = 1, 
             [FromQuery] int pageSize = 10,
             [FromQuery] string? severity = null,
-            [FromQuery] string? type = null)
+            [FromQuery] string? type = null,
+            [FromQuery] bool? resolved = null)
         {
             if (page < 1) page = 1;
             if (pageSize < 1) pageSize = 10;
@@ -54,6 +55,18 @@ namespace Nexora.WebApi.Controllers
                 .ToListAsync();
 
             var query = _context.Alerts.Where(a => deviceIds.Contains(a.DeviceId));
+
+            if (resolved.HasValue)
+            {
+                if (resolved.Value)
+                {
+                    query = query.Where(a => _context.MaintenanceTickets.Any(t => t.AlertId == a.Id && t.Status == Nexora.Domain.Enums.TicketStatus.Resolved));
+                }
+                else
+                {
+                    query = query.Where(a => !_context.MaintenanceTickets.Any(t => t.AlertId == a.Id && t.Status == Nexora.Domain.Enums.TicketStatus.Resolved));
+                }
+            }
 
             if (!string.IsNullOrEmpty(severity))
             {

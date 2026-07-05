@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Nexora.WebApi.Controllers
 {
     [ApiController]
-    [Route("api/v1/telemetry")]
+    [Route("api/v1/telemetries")]
     public class TelemetryController : ControllerBase
     {
         private readonly ITelemetryProcessor _telemetryProcessor;

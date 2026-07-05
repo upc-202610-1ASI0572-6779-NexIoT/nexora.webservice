@@ -85,6 +85,72 @@ namespace Nexora.WebApi.Controllers
             if (plan == null)
                 return BadRequest("Subscription plan not found.");
 
+            if (string.IsNullOrEmpty(Stripe.StripeConfiguration.ApiKey) || Stripe.StripeConfiguration.ApiKey.Contains("YOUR_STRIPE"))
+            {
+                var existingLocal = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
+                if (existingLocal != null)
+                {
+                    if (existingLocal.Status == SubscriptionStatus.Cancelled || existingLocal.Status == SubscriptionStatus.Expired)
+                    {
+                        var oldInvs = await _context.Invoices.Where(i => i.SubscriptionId == existingLocal.Id).ToListAsync();
+                        var oldInvIds = oldInvs.Select(i => i.Id).ToList();
+                        var oldPmts = await _context.Payments.Where(p => oldInvIds.Contains(p.InvoiceId)).ToListAsync();
+                        var oldEvts = await _context.SubscriptionEvents.Where(e => e.SubscriptionId == existingLocal.Id).ToListAsync();
+
+                        _context.Payments.RemoveRange(oldPmts);
+                        _context.Invoices.RemoveRange(oldInvs);
+                        _context.SubscriptionEvents.RemoveRange(oldEvts);
+                        _context.Subscriptions.Remove(existingLocal);
+
+                        await _unitOfWork.SaveChangesAsync();
+                    }
+                    else
+                    {
+                        if (existingLocal.SubscriptionPlanId == plan.Id)
+                        {
+                            return BadRequest("Already subscribed to this plan.");
+                        }
+
+                        existingLocal.ChangePlan(plan.Id, DateTime.UtcNow.AddMonths(1));
+                        await _subscriptionRepository.UpdateAsync(existingLocal);
+
+                        var changePlanEvt = new SubscriptionEvent(
+                            existingLocal.Id,
+                            "Plan Changed",
+                            $"Upgraded/Downgraded plan to: {plan.Name} (Local Dev). Price: ${plan.MonthlyPrice}/mo."
+                        );
+                        _context.SubscriptionEvents.Add(changePlanEvt);
+                        await _unitOfWork.SaveChangesAsync();
+
+                        var subDtoChanged = MapToDto(existingLocal);
+                        return Ok(new { subscription = subDtoChanged, clientSecret = (string?)null });
+                    }
+                }
+
+                var localNow = DateTime.UtcNow;
+                var localPeriodEnd = localNow.AddMonths(1);
+                var localSub = new Nexora.Domain.Entities.Subscription(landlord.Id, plan.Id, localNow, localPeriodEnd);
+                await _subscriptionRepository.AddAsync(localSub);
+                await _unitOfWork.SaveChangesAsync();
+
+                var localSubFromDb = await _subscriptionRepository.GetByIdAsync(localSub.Id);
+                var localDueDate = localNow.AddDays(7);
+                var localInvoice = new Nexora.Domain.Entities.Invoice(localSub.Id, plan.MonthlyPrice, localDueDate);
+                _context.Invoices.Add(localInvoice);
+
+                var localEvt = new SubscriptionEvent(localSub.Id, "Subscription Created",
+                    $"Plan {plan.Name} activated locally. ${plan.MonthlyPrice}/mo.");
+                _context.SubscriptionEvents.Add(localEvt);
+                await _unitOfWork.SaveChangesAsync();
+
+                var localSubDto = MapToDto(localSubFromDb!);
+                return Ok(new
+                {
+                    subscription = localSubDto,
+                    clientSecret = (string?)null
+                });
+            }
+
             var existing = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
             if (existing != null)
             {

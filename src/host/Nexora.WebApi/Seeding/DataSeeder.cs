@@ -366,127 +366,21 @@ namespace Nexora.WebApi.Seeding
                     existing.UpdateFirmwareVersion(def.Firmware);
                     _context.Devices.Update(existing);
                 }
-                existing.AssignToProperty(properties[def.PropertyIdx].Id);
+                existing.AssignToProperty(null);
             }
             await _context.SaveChangesAsync();
 
             // ── Telemetry (yearly, hourly) ──────────────────────────
+            // Left completely empty as requested.
             if (!await _context.TelemetryLogs.AnyAsync())
             {
-                var waterDevice = await _context.Devices.FindAsync("water-safety-unit-apt-402");
-                var powerDevice = await _context.Devices.FindAsync("voltage-safety-unit-apt-402");
-
-                if (waterDevice != null && powerDevice != null)
-                {
-                    var rng = new Random(20260101);
-                    var logs = new List<TelemetryLog>();
-
-                    var oneYearAgo = now.AddDays(-365);
-                    var fineGrainStart = now.AddDays(-45);
-                    var timeline = new List<DateTime>();
-                    for (var t = oneYearAgo; t < fineGrainStart; t = t.AddHours(4)) timeline.Add(t);
-                    for (var t = fineGrainStart; t <= now; t = t.AddHours(1)) timeline.Add(t);
-
-                    foreach (var ts in timeline)
-                    {
-                        double hour = ts.Hour + ts.Minute / 60.0;
-                        double morning = Math.Exp(-Math.Pow(hour - 8.0, 2) / 6.0);
-                        double evening = Math.Exp(-Math.Pow(hour - 20.0, 2) / 8.0);
-                        double daily = morning + evening;
-                        bool weekend = ts.DayOfWeek == DayOfWeek.Saturday || ts.DayOfWeek == DayOfWeek.Sunday;
-                        double weekendBoost = weekend ? 1.25 : 1.0;
-                        double seasonal = 1.0 + 0.15 * Math.Sin(2 * Math.PI * ts.DayOfYear / 365.0);
-
-                        double waterFlow = (0.15 + 3.2 * daily * weekendBoost * seasonal) * (0.7 + rng.NextDouble() * 0.6);
-                        if (rng.NextDouble() < 0.012) waterFlow += 18 + rng.NextDouble() * 10;
-                        waterFlow = Math.Max(0, Math.Round(waterFlow, 2));
-
-                        bool presence = daily > 0.25 ? rng.NextDouble() < 0.6 : rng.NextDouble() < 0.1;
-                        logs.Add(new TelemetryLog(waterDevice.Id, waterFlow, 0, presence, 0, true, ts));
-
-                        double current = (1.4 + 5.5 * daily * weekendBoost * seasonal) * (0.75 + rng.NextDouble() * 0.5);
-                        if (rng.NextDouble() < 0.008) current += 14 + rng.NextDouble() * 9;
-                        current = Math.Max(0, Math.Round(current, 2));
-                        bool voltageOk = rng.NextDouble() > 0.01;
-                        logs.Add(new TelemetryLog(powerDevice.Id, 0, 0, false, current, voltageOk, ts));
-                    }
-
-                    await _context.TelemetryLogs.AddRangeAsync(logs);
-                    await _context.SaveChangesAsync();
-                }
-
-                // Recent telemetry for all devices (last 6 months, 5 samples each)
-                var allDevices = await _context.Devices.ToListAsync();
-                var deviceLogs = new List<TelemetryLog>();
-
-                foreach (var device in allDevices)
-                {
-                    for (int m = 5; m >= 0; m--)
-                    {
-                        var monthDate = now.AddMonths(-m);
-                        for (int l = 0; l < 5; l++)
-                        {
-                            var timestamp = new DateTime(monthDate.Year, monthDate.Month, Math.Min(monthDate.Day + l * 2 + 1, 28), 10 + l, 0, 0, DateTimeKind.Utc);
-                            var rand = new Random();
-                            deviceLogs.Add(new TelemetryLog(
-                                device.Id,
-                                1.0 + rand.NextDouble() * 3.0,
-                                10.0 + rand.NextDouble() * 20.0,
-                                m < 3 ? rand.NextDouble() > 0.3 : false,
-                                8.0 + rand.NextDouble() * 12.0,
-                                rand.NextDouble() > 0.05,
-                                timestamp
-                            ));
-                        }
-                    }
-                }
-
-                await _context.TelemetryLogs.AddRangeAsync(deviceLogs);
-                await _context.SaveChangesAsync();
-
-                // Anomalies
-                var anomalyTime1 = now.AddHours(-2);
-                var anomalyTime2 = now.AddHours(-1);
-                var anomalyTime3 = now.AddMinutes(-30);
-
-                _context.TelemetryLogs.Add(new TelemetryLog("voltage-safety-unit-apt-402", 2.1, 0.0, false, 15.4, false, anomalyTime1));
-                _context.TelemetryLogs.Add(new TelemetryLog("voltage-safety-unit-apt-402", 1.8, 0.0, false, 22.5, true, anomalyTime2));
-                _context.TelemetryLogs.Add(new TelemetryLog("gas-safety-unit-apt-402", 0.0, 320.0, false, 0.0, true, anomalyTime3));
-
                 await _context.SaveChangesAsync();
             }
 
             // ── Alerts & Tickets ────────────────────────────────────
+            // Left completely empty as requested so alerts are clean and configured from interface.
             if (!await _context.Alerts.AnyAsync())
             {
-                var deviceIds = deviceDefs.Select(d => d.Id).ToArray();
-                var alertTime1 = now.AddHours(-2);
-                var alertTime2 = now.AddHours(-1);
-                var alertTime3 = now.AddMinutes(-30);
-
-                var alert1 = new Alert(AlertSeverity.Critical, "Voltage Instability Anomaly", alertTime1, "voltage-safety-unit-apt-402");
-                _context.Alerts.Add(alert1);
-
-                var alert2 = new Alert(AlertSeverity.Warning, "Overcurrent Detected", alertTime2, "voltage-safety-unit-apt-402");
-                _context.Alerts.Add(alert2);
-
-                var alert3 = new Alert(AlertSeverity.Critical, "Critical Gas Leak Level", alertTime3, "gas-safety-unit-apt-402");
-                _context.Alerts.Add(alert3);
-
-                await _context.SaveChangesAsync();
-
-                var ticket1 = new MaintenanceTicket(alert1);
-                ticket1.Assign("Ing. Carlos Mendoza");
-                _context.MaintenanceTickets.Add(ticket1);
-
-                var ticket2 = new MaintenanceTicket(alert2);
-                _context.MaintenanceTickets.Add(ticket2);
-
-                var ticket3 = new MaintenanceTicket(alert3);
-                ticket3.Assign("Ing. Sofía Reyes");
-                ticket3.Resolve();
-                _context.MaintenanceTickets.Add(ticket3);
-
                 await _context.SaveChangesAsync();
             }
         }
