@@ -71,6 +71,13 @@ namespace Nexora.Domain.Entities
             CancelledAt = DateTime.UtcNow;
         }
 
+        /// <summary>Undoes a pending cancellation, keeping the subscription renewing.</summary>
+        public void UndoCancel()
+        {
+            CancelAtPeriodEnd = false;
+            CancelledAt = null;
+        }
+
         public void Expire()
         {
             Status = SubscriptionStatus.Expired;
