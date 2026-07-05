@@ -28,6 +28,10 @@ namespace Nexora.WebApi.Seeding
 
         public async Task EnsureSeedDataAsync()
         {
+            // Keep the subscription plans aligned with the current product spec
+            // on every startup (idempotent UPDATEs), even for an already-seeded DB.
+            await SeedOrUpdatePlansAsync();
+
             if (!await _context.Users.AnyAsync())
             {
                 var users = new[] {
@@ -66,6 +70,18 @@ namespace Nexora.WebApi.Seeding
 
             await SeedTenantDataAsync();
             await SeedSubscriptionDataAsync();
+        }
+
+        /// <summary>
+        /// Keeps the two subscription plans aligned with the current product spec:
+        /// Basic ($0.99/mo, up to 2 properties) and Plus ($5/mo, unlimited). Idempotent.
+        /// </summary>
+        private async Task SeedOrUpdatePlansAsync()
+        {
+            await _context.Database.ExecuteSqlRawAsync(
+                "UPDATE subscription_plans SET name = 'Basic', monthly_price = 0.99, max_properties_limit = 2, unlimited_properties = FALSE WHERE id = 1");
+            await _context.Database.ExecuteSqlRawAsync(
+                "UPDATE subscription_plans SET name = 'Plus', monthly_price = 5.00, max_properties_limit = 0, unlimited_properties = TRUE WHERE id = 2");
         }
 
         private async Task SeedTenantDataAsync()

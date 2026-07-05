@@ -19,15 +19,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\shared\Nexora.Shared.Domain\Nexora.Shared.Domain.csproj" />
     <ProjectReference Include="..\..\shared\Nexora.Shared.Infrastructure\Nexora.Shared.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\contexts\identity-access-management\Application\Nexora.Contexts.IdentityAccessManagement.Application.csproj" />
-    <ProjectReference Include="..\..\contexts\identity-access-management\Infrastructure\Nexora.Contexts.IdentityAccessManagement.Infrastructure.csproj" />
     <ProjectReference Include="..\..\contexts\identity-access-management\Presentation\Nexora.Contexts.IdentityAccessManagement.Presentation.csproj" />
     <ProjectReference Include="..\..\contexts\resource-asset-management\Application\Nexora.Contexts.ResourceAssetManagement.Application.csproj" />
-    <ProjectReference Include="..\..\contexts\resource-asset-management\Infrastructure\Nexora.Contexts.ResourceAssetManagement.Infrastructure.csproj" />
     <ProjectReference Include="..\..\contexts\resource-asset-management\Presentation\Nexora.Contexts.ResourceAssetManagement.Presentation.csproj" />
-    <ProjectReference Include="..\..\contexts\service-monitoring-intelligence\Application\Nexora.Contexts.ServiceMonitoringIntelligence.Application.csproj" />
-    <ProjectReference Include="..\..\contexts\service-monitoring-intelligence\Infrastructure\Nexora.Contexts.ServiceMonitoringIntelligence.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\contexts\service-monitoring-intelligence\Presentation\Nexora.Contexts.ServiceMonitoringIntelligence.Presentation.csproj" />
     <ProjectReference Include="..\..\contexts\service-execution-maintenance\Application\Nexora.Contexts.ServiceExecutionMaintenance.Application.csproj" />
     <ProjectReference Include="..\..\contexts\service-execution-maintenance\Infrastructure\Nexora.Contexts.ServiceExecutionMaintenance.Infrastructure.csproj" />
     <ProjectReference Include="..\..\contexts\service-execution-maintenance\Presentation\Nexora.Contexts.ServiceExecutionMaintenance.Presentation.csproj" />
