@@ -7,7 +7,9 @@ using Nexora.Domain.Enums;
 using Nexora.Domain.Repositories;
 using Nexora.Infrastructure.Persistence;
 using System.Security.Claims;
+using Microsoft.Extensions.Configuration;
 using Stripe;
+using Stripe.Checkout;
 
 using StripeInvoice = Stripe.Invoice;
 using StripeSubscription = Stripe.Subscription;
@@ -20,21 +22,41 @@ namespace Nexora.WebApi.Controllers
     [Route("api/v1/subscriptions")]
     public class SubscriptionsController : ControllerBase
     {
+        // Restricts the PaymentSheet to card only, matching the web app's checkout
+        // (which uses Stripe's basic Card Element). Hides Klarna, Cash App Pay,
+        // Amazon Pay, Bank, Link, etc. that Stripe would otherwise offer automatically
+        // based on the dashboard's enabled payment methods.
+        private static readonly List<string> AllowedPaymentMethodTypes = new() { "card" };
+
         private readonly NexoraDbContext _context;
         private readonly ILandlordRepository _landlordRepository;
         private readonly ISubscriptionRepository _subscriptionRepository;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IConfiguration _config;
 
         public SubscriptionsController(
             NexoraDbContext context,
             ILandlordRepository landlordRepository,
             ISubscriptionRepository subscriptionRepository,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IConfiguration config)
         {
             _context = context;
             _landlordRepository = landlordRepository;
             _subscriptionRepository = subscriptionRepository;
             _unitOfWork = unitOfWork;
+            _config = config;
+        }
+
+        /// <summary>
+        /// Public Stripe configuration (publishable key) needed to initialise the
+        /// flutter_stripe SDK client-side. Safe to expose without authentication.
+        /// </summary>
+        [HttpGet("config")]
+        public IActionResult GetConfig()
+        {
+            var key = _config["Stripe:PublishableKey"] ?? string.Empty;
+            return Ok(new StripeConfigDto(key));
         }
 
         [HttpGet("plans")]
@@ -43,16 +65,10 @@ namespace Nexora.WebApi.Controllers
             var plans = await _context.SubscriptionPlans
                 .Where(p => p.IsActive)
                 .OrderBy(p => p.MonthlyPrice)
-                .Select(p => new SubscriptionPlanDto(
-                    p.Id,
-                    p.Name,
-                    p.MonthlyPrice,
-                    p.MaxPropertiesLimit,
-                    p.UnlimitedProperties
-                ))
                 .ToListAsync();
 
-            return Ok(plans);
+            var dtos = plans.Select(BuildPlanDto).ToList();
+            return Ok(dtos);
         }
 
         [Authorize]
@@ -227,9 +243,14 @@ namespace Nexora.WebApi.Controllers
                                 Price = stripePrice.Id
                             }
                         },
-                        ProrationBehavior = "create_prorations"
+                        ProrationBehavior = "create_prorations",
+                        PaymentSettings = new Stripe.SubscriptionPaymentSettingsOptions
+                        {
+                            PaymentMethodTypes = AllowedPaymentMethodTypes
+                        }
                     };
                     stripeSubscriptionUpdateOptions.AddExpand("latest_invoice.confirmation_secret");
+                    stripeSubscriptionUpdateOptions.AddExpand("latest_invoice.payments.data.payment");
 
                     stripeSub = await stripeSubSvc.UpdateAsync(existing.StripeSubscriptionId, stripeSubscriptionUpdateOptions);
 
@@ -246,7 +267,10 @@ namespace Nexora.WebApi.Controllers
 
                     await _unitOfWork.SaveChangesAsync();
 
-                    var prorationClientSecret = stripeSub.LatestInvoice?.ConfirmationSecret?.ClientSecret;
+                    // Downgrades (or fully-credited prorations) can leave the invoice's
+                    // PaymentIntent already settled with nothing left to collect; only
+                    // surface a clientSecret when the client actually needs to confirm it.
+                    var prorationClientSecret = await GetClientSecretIfPaymentRequiredAsync(stripeSub.LatestInvoice);
 
                     return Ok(new
                     {
@@ -329,20 +353,20 @@ namespace Nexora.WebApi.Controllers
                 PaymentBehavior = "default_incomplete",
                 PaymentSettings = new Stripe.SubscriptionPaymentSettingsOptions
                 {
-                    SaveDefaultPaymentMethod = "on_subscription"
+                    SaveDefaultPaymentMethod = "on_subscription",
+                    PaymentMethodTypes = AllowedPaymentMethodTypes
                 },
-                Expand = new List<string> { "latest_invoice.confirmation_secret" }
+                Expand = new List<string> { "latest_invoice.confirmation_secret", "latest_invoice.payments.data.payment" }
             });
 
             StripeInvoice stripeInvoice = stripeSubscription.LatestInvoice;
-            var clientSecret = stripeInvoice.ConfirmationSecret?.ClientSecret;
+            var clientSecret = await GetClientSecretIfPaymentRequiredAsync(stripeInvoice);
 
             // 4. Local Database Creation
             var now = DateTime.UtcNow;
             var periodEnd = now.AddMonths(1);
 
             var subscription = new LocalSubscription(landlord.Id, plan.Id, now, periodEnd);
-            subscription.SetStripeSubscriptionId(stripeSubscription.Id);
 
             await _subscriptionRepository.AddAsync(subscription);
             await _unitOfWork.SaveChangesAsync();
@@ -355,7 +379,7 @@ namespace Nexora.WebApi.Controllers
             _context.Invoices.Add(invoice);
 
             var evt = new SubscriptionEvent(subscription.Id, "Subscription Created",
-                $"Plan {plan.Name} activated. ${plan.MonthlyPrice}/mo. Stripe Subscription: {stripeSubscription.Id}");
+                $"Plan {plan.Name} activated. ${plan.MonthlyPrice}/mo.");
 
             _context.SubscriptionEvents.Add(evt);
 
@@ -366,6 +390,238 @@ namespace Nexora.WebApi.Controllers
             return Ok(new ActivateSubscriptionResponse(subDto, plan.MonthlyPrice, dueDate, invoice.Id, clientSecret));
         }
 
+        /// <summary>
+        /// Creates a Stripe Checkout Session (hosted payment page) for the selected plan.
+        /// The mobile app opens the returned URL in the browser; after payment it calls
+        /// POST /sync to reflect the result locally.
+        /// </summary>
+        [Authorize]
+        [HttpPost("checkout-session")]
+        public async Task<IActionResult> CreateCheckoutSession([FromBody] ActivateSubscriptionRequest request)
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null) return Unauthorized();
+
+            var plan = await _context.SubscriptionPlans.FindAsync(request.SubscriptionPlanId);
+            if (plan == null) return BadRequest("Subscription plan not found.");
+
+            try
+            {
+                // Ensure Stripe customer for this landlord.
+                if (string.IsNullOrEmpty(landlord.StripeCustomerId))
+                {
+                    var customerService = new CustomerService();
+                    var email = User.FindFirstValue(ClaimTypes.Email) ?? "landlord@nexora.com";
+                    var customer = await customerService.CreateAsync(new CustomerCreateOptions
+                    {
+                        Email = email,
+                        Name = $"{landlord.FirstName} {landlord.LastName}",
+                        Metadata = new Dictionary<string, string> { { "landlord_id", landlord.Id.ToString() } }
+                    });
+                    landlord.SetStripeCustomerId(customer.Id);
+                    await _landlordRepository.UpdateAsync(landlord);
+                    await _unitOfWork.SaveChangesAsync();
+                }
+
+                var product = await EnsureStripeProductAsync(plan);
+                var price = await EnsureStripePriceAsync(product, plan);
+
+                var successUrl = _config["Stripe:CheckoutSuccessUrl"] ?? "https://checkout.stripe.com/success";
+                var cancelUrl = _config["Stripe:CheckoutCancelUrl"] ?? "https://checkout.stripe.com/cancel";
+
+                var sessionService = new SessionService();
+                var session = await sessionService.CreateAsync(new SessionCreateOptions
+                {
+                    Mode = "subscription",
+                    Customer = landlord.StripeCustomerId,
+                    LineItems = new List<SessionLineItemOptions>
+                    {
+                        new SessionLineItemOptions { Price = price.Id, Quantity = 1 }
+                    },
+                    SuccessUrl = successUrl,
+                    CancelUrl = cancelUrl,
+                    SubscriptionData = new SessionSubscriptionDataOptions
+                    {
+                        Metadata = new Dictionary<string, string>
+                        {
+                            { "landlord_id", landlord.Id.ToString() },
+                            { "plan_id", plan.Id.ToString() }
+                        }
+                    }
+                });
+
+                return Ok(new CheckoutSessionResponse(session.Url, session.Id));
+            }
+            catch (StripeException ex)
+            {
+                return StatusCode(502, new { message = $"Stripe error: {ex.Message}" });
+            }
+        }
+
+        /// <summary>
+        /// Reconciles the local subscription with the landlord's active Stripe subscription
+        /// (called by the app after returning from Stripe Checkout).
+        /// </summary>
+        [Authorize]
+        [HttpPost("sync")]
+        public async Task<IActionResult> Sync()
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null) return Unauthorized();
+            if (string.IsNullOrEmpty(landlord.StripeCustomerId))
+                return Ok(new { subscription = (object?)null });
+
+            try
+            {
+                var subSvc = new Stripe.SubscriptionService();
+                var stripeSubs = await subSvc.ListAsync(new Stripe.SubscriptionListOptions
+                {
+                    Customer = landlord.StripeCustomerId,
+                    Status = "active",
+                    Limit = 1
+                });
+                var stripeSub = stripeSubs.FirstOrDefault();
+                if (stripeSub == null)
+                {
+                    var currentLocal = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
+                    return Ok(new { subscription = currentLocal == null ? null : MapToDto(currentLocal) });
+                }
+
+                long planId = 0;
+                if (stripeSub.Metadata != null && stripeSub.Metadata.TryGetValue("plan_id", out var pidStr))
+                    long.TryParse(pidStr, out planId);
+                var plan = planId > 0 ? await _context.SubscriptionPlans.FindAsync(planId) : null;
+
+                var existing = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
+                var now = DateTime.UtcNow;
+                var periodEnd = now.AddMonths(1);
+
+                if (plan != null)
+                {
+                    if (existing == null)
+                    {
+                        var newSub = new LocalSubscription(landlord.Id, plan.Id, now, periodEnd);
+                        newSub.SetStripeSubscriptionId(stripeSub.Id);
+                        await _subscriptionRepository.AddAsync(newSub);
+                        await _unitOfWork.SaveChangesAsync();
+
+                        _context.SubscriptionEvents.Add(new SubscriptionEvent(newSub.Id, "Subscription Created",
+                            $"Plan {plan.Name} activated via Stripe Checkout. ${plan.MonthlyPrice}/mo."));
+                        _context.Invoices.Add(new LocalInvoice(newSub.Id, plan.MonthlyPrice, now.AddDays(30)));
+                        await _unitOfWork.SaveChangesAsync();
+                        existing = newSub;
+                    }
+                    else if (existing.SubscriptionPlanId != plan.Id || existing.StripeSubscriptionId != stripeSub.Id)
+                    {
+                        existing.ChangePlan(plan.Id, periodEnd);
+                        existing.SetStripeSubscriptionId(stripeSub.Id);
+                        await _subscriptionRepository.UpdateAsync(existing);
+                        _context.SubscriptionEvents.Add(new SubscriptionEvent(existing.Id, "Plan Changed",
+                            $"Synced from Stripe Checkout to plan {plan.Name}. ${plan.MonthlyPrice}/mo."));
+                        await _unitOfWork.SaveChangesAsync();
+                    }
+                }
+
+                var full = existing == null ? null : await _subscriptionRepository.GetByIdAsync(existing.Id);
+                return Ok(new { subscription = full == null ? null : MapToDto(full) });
+            }
+            catch (StripeException ex)
+            {
+                return StatusCode(502, new { message = $"Stripe error: {ex.Message}" });
+            }
+        }
+
+        private static async Task<Product> EnsureStripeProductAsync(SubscriptionPlan plan)
+        {
+            var productService = new ProductService();
+            try
+            {
+                return await productService.GetAsync($"plan_{plan.Id}");
+            }
+            catch (StripeException)
+            {
+                return await productService.CreateAsync(new ProductCreateOptions
+                {
+                    Id = $"plan_{plan.Id}",
+                    Name = plan.Name,
+                    Description = $"Nexora Subscription Plan: {plan.Name}"
+                });
+            }
+        }
+
+        private static async Task<Price> EnsureStripePriceAsync(Product product, SubscriptionPlan plan)
+        {
+            var priceService = new PriceService();
+            var prices = await priceService.ListAsync(new PriceListOptions { Product = product.Id, Active = true });
+            var price = prices.FirstOrDefault(p => p.UnitAmount == (long)(plan.MonthlyPrice * 100));
+            return price ?? await priceService.CreateAsync(new PriceCreateOptions
+            {
+                Product = product.Id,
+                UnitAmount = (long)(plan.MonthlyPrice * 100),
+                Currency = "usd",
+                Recurring = new PriceRecurringOptions { Interval = "month" }
+            });
+        }
+
+        /// <summary>
+        /// Returns the invoice's PaymentIntent client secret only when the client still
+        /// needs to confirm it (e.g. requires a payment method or 3D Secure). Downgrades
+        /// or fully-credited prorations can leave the PaymentIntent already 'succeeded'
+        /// (or absent, for a zero-amount invoice) — in those cases no native PaymentSheet
+        /// confirmation is needed, so we return null.
+        /// </summary>
+        private static async Task<string?> GetClientSecretIfPaymentRequiredAsync(StripeInvoice? invoice)
+        {
+            var clientSecret = invoice?.ConfirmationSecret?.ClientSecret;
+            if (string.IsNullOrEmpty(clientSecret)) return null;
+
+            // The PaymentIntent id lives under the newer Invoice Payments API shape:
+            // invoice.payments.data[].payment.payment_intent_id (Stripe caps expand at
+            // 4 levels, so we fetch the PaymentIntent itself in a second call).
+            var paymentIntentId = invoice?.Payments?.Data?.FirstOrDefault()?.Payment?.PaymentIntentId;
+            if (string.IsNullOrEmpty(paymentIntentId))
+            {
+                // Status unknown (e.g. no payment record yet) — fail open and let the
+                // client attempt confirmation, matching the previous behaviour.
+                return clientSecret;
+            }
+
+            var paymentIntent = await new PaymentIntentService().GetAsync(paymentIntentId);
+            var needsConfirmation = paymentIntent.Status is "requires_payment_method"
+                or "requires_confirmation"
+                or "requires_action";
+            return needsConfirmation ? clientSecret : null;
+        }
+
+        [Authorize]
+        [HttpGet("payment-method")]
+        public async Task<IActionResult> GetPaymentMethod()
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null) return Unauthorized();
+
+            var savedCard = await _context.SavedCards
+                .FirstOrDefaultAsync(c => c.LandlordId == landlord.Id);
+
+            if (savedCard == null)
+                return Ok(new { paymentMethod = (object?)null });
+
+            var dto = new PaymentMethodDto(
+                savedCard.Id,
+                savedCard.Brand,
+                savedCard.LastFour,
+                savedCard.FullNumber,
+                savedCard.ExpiryMonth,
+                savedCard.ExpiryYear,
+                savedCard.HolderName,
+                savedCard.Cvv,
+                landlord.FirstName,
+                landlord.LastName
+            );
+
+            return Ok(new { paymentMethod = dto });
+        }
+
         [Authorize]
         [HttpGet("payment-methods")]
         public async Task<IActionResult> GetPaymentMethods()
@@ -373,25 +629,26 @@ namespace Nexora.WebApi.Controllers
             var landlord = await GetLandlordAsync();
             if (landlord == null) return Unauthorized();
 
+            var firstName = landlord.FirstName;
+            var lastName = landlord.LastName;
             var savedCards = await _context.SavedCards
                 .Where(c => c.LandlordId == landlord.Id)
                 .OrderByDescending(c => c.CreatedAt)
+                .Select(c => new PaymentMethodDto(
+                    c.Id,
+                    c.Brand,
+                    c.LastFour,
+                    c.FullNumber,
+                    c.ExpiryMonth,
+                    c.ExpiryYear,
+                    c.HolderName,
+                    c.Cvv,
+                    firstName,
+                    lastName
+                ))
                 .ToListAsync();
 
-            var dtos = savedCards.Select(c => new PaymentMethodDto(
-                c.Id,
-                c.Brand,
-                c.LastFour,
-                c.FullNumber,
-                c.ExpiryMonth,
-                c.ExpiryYear,
-                c.HolderName,
-                c.Cvv,
-                landlord.FirstName,
-                landlord.LastName
-            )).ToList();
-
-            return Ok(new { paymentMethods = dtos });
+            return Ok(new { paymentMethods = savedCards });
         }
 
         [Authorize]
@@ -479,7 +736,7 @@ namespace Nexora.WebApi.Controllers
 
         [Authorize]
         [HttpPut("payment-methods/{id:long}")]
-        public async Task<IActionResult> UpdatePaymentMethodById(long id, [FromBody] UpdatePaymentMethodRequest request)
+        public async Task<IActionResult> UpdatePaymentMethod(long id, [FromBody] UpdatePaymentMethodRequest request)
         {
             var landlord = await GetLandlordAsync();
             if (landlord == null) return Unauthorized();
@@ -539,8 +796,108 @@ namespace Nexora.WebApi.Controllers
         }
 
         [Authorize]
-        [HttpPost("current/cancel")]
+        [HttpPut("status")]
         public async Task<IActionResult> Cancel()
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null) return Unauthorized();
+
+            var subscription = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
+            if (subscription == null)
+                return BadRequest("No active subscription found.");
+
+            if (subscription.Status != SubscriptionStatus.Active && subscription.Status != SubscriptionStatus.PastDue)
+                return BadRequest($"Cannot cancel subscription in status {subscription.Status}.");
+
+            if (!string.IsNullOrEmpty(subscription.StripeSubscriptionId))
+            {
+                try
+                {
+                    var stripeSubSvc = new Stripe.SubscriptionService();
+                    await stripeSubSvc.UpdateAsync(subscription.StripeSubscriptionId, new Stripe.SubscriptionUpdateOptions
+                    {
+                        CancelAtPeriodEnd = true
+                    });
+                }
+                catch (StripeException ex)
+                {
+                    return StatusCode(502, new { message = $"Stripe error: {ex.Message}" });
+                }
+            }
+
+            subscription.Cancel();
+
+            var evt = new SubscriptionEvent(subscription.Id, "Subscription Cancelled",
+                $"Cancelled at period end: {subscription.CurrentPeriodEnd:yyyy-MM-dd}.");
+
+            _context.SubscriptionEvents.Add(evt);
+            await _subscriptionRepository.UpdateAsync(subscription);
+            await _unitOfWork.SaveChangesAsync();
+
+            var updated = await _subscriptionRepository.GetByIdAsync(subscription.Id);
+            return Ok(new
+            {
+                message = "Subscription will be cancelled at period end.",
+                subscription = MapToDto(updated!)
+            });
+        }
+
+        /// <summary>Undoes a pending cancellation so the subscription keeps renewing.</summary>
+        [Authorize]
+        [HttpPut("status/resume")]
+        public async Task<IActionResult> Resume()
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null) return Unauthorized();
+
+            var subscription = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
+            if (subscription == null)
+                return BadRequest("No active subscription found.");
+
+            if (!subscription.CancelAtPeriodEnd)
+                return BadRequest("Subscription is not scheduled for cancellation.");
+
+            if (!string.IsNullOrEmpty(subscription.StripeSubscriptionId))
+            {
+                try
+                {
+                    var stripeSubSvc = new Stripe.SubscriptionService();
+                    await stripeSubSvc.UpdateAsync(subscription.StripeSubscriptionId, new Stripe.SubscriptionUpdateOptions
+                    {
+                        CancelAtPeriodEnd = false
+                    });
+                }
+                catch (StripeException ex)
+                {
+                    return StatusCode(502, new { message = $"Stripe error: {ex.Message}" });
+                }
+            }
+
+            subscription.UndoCancel();
+
+            var evt = new SubscriptionEvent(subscription.Id, "Subscription Resumed",
+                "Cancellation undone; subscription will continue renewing.");
+
+            _context.SubscriptionEvents.Add(evt);
+            await _subscriptionRepository.UpdateAsync(subscription);
+            await _unitOfWork.SaveChangesAsync();
+
+            var updated = await _subscriptionRepository.GetByIdAsync(subscription.Id);
+            return Ok(new
+            {
+                message = "Subscription will continue renewing.",
+                subscription = MapToDto(updated!)
+            });
+        }
+
+        /// <summary>
+        /// Cancels the current subscription at period end (local-only flow used by
+        /// the web app). The mobile flow (<see cref="Cancel"/> at PUT status) also
+        /// cancels the Stripe subscription; this route is kept for existing clients.
+        /// </summary>
+        [Authorize]
+        [HttpPost("current/cancel")]
+        public async Task<IActionResult> CancelCurrent()
         {
             var landlord = await GetLandlordAsync();
             if (landlord == null) return Unauthorized();
@@ -575,22 +932,64 @@ namespace Nexora.WebApi.Controllers
             return await _landlordRepository.GetByUserIdAsync(userId);
         }
 
-        private static SubscriptionDto MapToDto(Nexora.Domain.Entities.Subscription s)
+        private static SubscriptionDto MapToDto(LocalSubscription s)
         {
             return new SubscriptionDto(
                 s.Id,
-                new SubscriptionPlanDto(
-                    s.Plan.Id,
-                    s.Plan.Name,
-                    s.Plan.MonthlyPrice,
-                    s.Plan.MaxPropertiesLimit,
-                    s.Plan.UnlimitedProperties
-                ),
+                BuildPlanDto(s.Plan),
                 s.Status.ToString(),
                 s.StartedAt,
                 s.CurrentPeriodStart,
                 s.CurrentPeriodEnd,
                 s.CancelAtPeriodEnd
+            );
+        }
+
+        // Presentation copy for each plan, served by the API so the mobile app never
+        // hardcodes it. Amount/name/limits come from the database.
+        private static readonly Dictionary<string, (string Tagline, string Description, string[] Features, bool Popular)> PlanMarketing =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Basic"] = (
+                    "CONNECTED LIVING",
+                    "Essential basic features for your day-to-day.",
+                    new[]
+                    {
+                        "IoT control from mobile app",
+                        "Remote On/Off",
+                        "Live device status",
+                        "Basic notifications"
+                    },
+                    false),
+                ["Plus"] = (
+                    "SMART PROPERTY MANAGEMENT",
+                    "Total customization and automated energy efficiency.",
+                    new[]
+                    {
+                        "Scenarios (Night/Savings Mode)",
+                        "Detailed usage history",
+                        "Personalized smart alerts",
+                        "Multi-user configuration",
+                        "Optimized experience without limits"
+                    },
+                    true),
+            };
+
+        private static SubscriptionPlanDto BuildPlanDto(SubscriptionPlan p)
+        {
+            // "Professional" is the legacy name for the Plus tier.
+            var key = p.Name.Equals("Professional", StringComparison.OrdinalIgnoreCase) ? "Plus" : p.Name;
+            PlanMarketing.TryGetValue(key, out var m);
+            return new SubscriptionPlanDto(
+                p.Id,
+                p.Name,
+                p.MonthlyPrice,
+                p.MaxPropertiesLimit,
+                p.UnlimitedProperties,
+                m.Tagline,
+                m.Description,
+                m.Features,
+                m.Popular
             );
         }
     }

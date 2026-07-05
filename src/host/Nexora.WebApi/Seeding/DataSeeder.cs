@@ -28,7 +28,9 @@ namespace Nexora.WebApi.Seeding
 
         public async Task EnsureSeedDataAsync()
         {
-            if (await _context.Users.AnyAsync()) return;
+            // Keep the subscription plans aligned with the current product spec
+            // on every startup (idempotent UPDATEs), even for an already-seeded DB.
+            await SeedOrUpdatePlansAsync();
 
             await SeedLandlordUsersAsync();
             await SeedPropertiesAsync();
@@ -37,6 +39,18 @@ namespace Nexora.WebApi.Seeding
             await SeedSubscriptionsDataAsync();
             await SeedNotificationPreferencesAsync();
             await SeedIoTDataAsync();
+        }
+
+        /// <summary>
+        /// Keeps the two subscription plans aligned with the current product spec:
+        /// Basic ($0.99/mo, up to 2 properties) and Plus ($5/mo, unlimited). Idempotent.
+        /// </summary>
+        private async Task SeedOrUpdatePlansAsync()
+        {
+            await _context.Database.ExecuteSqlRawAsync(
+                "UPDATE subscription_plans SET name = 'Basic', monthly_price = 0.99, max_properties_limit = 2, unlimited_properties = FALSE WHERE id = 1");
+            await _context.Database.ExecuteSqlRawAsync(
+                "UPDATE subscription_plans SET name = 'Plus', monthly_price = 5.00, max_properties_limit = 0, unlimited_properties = TRUE WHERE id = 2");
         }
 
         private async Task SeedLandlordUsersAsync()
@@ -52,7 +66,10 @@ namespace Nexora.WebApi.Seeding
 
             foreach (var u in landlords)
             {
-                await _authService.RegisterLandlordAsync(u);
+                if (!await _context.Users.AnyAsync(x => x.Email == u.Email))
+                {
+                    await _authService.RegisterLandlordAsync(u);
+                }
             }
         }
 
@@ -72,6 +89,8 @@ namespace Nexora.WebApi.Seeding
 
             foreach (var p in properties)
             {
+                if (await _context.Properties.AnyAsync(x => x.Name == p.Name)) continue;
+
                 var user = await _context.Users.FirstOrDefaultAsync(x => x.Email == p.OwnerEmail);
                 if (user == null) continue;
 
@@ -84,8 +103,6 @@ namespace Nexora.WebApi.Seeding
 
         private async Task SeedGuestTenantsAsync()
         {
-            if (await _context.Tenants.AnyAsync()) return;
-
             var properties = await _context.Properties.OrderBy(p => p.Id).ToListAsync();
             if (properties.Count < 8) return;
 
@@ -110,6 +127,8 @@ namespace Nexora.WebApi.Seeding
                 var property = properties[index];
                 foreach (var g in guests)
                 {
+                    if (await _context.Tenants.AnyAsync(x => x.PhoneNumber == g.Phone)) continue;
+
                     var tenant = new Tenant(property.Id, g.FirstName, g.LastName, g.Country, g.City, g.Address, g.Phone);
                     _context.Tenants.Add(tenant);
                 }
@@ -132,7 +151,10 @@ namespace Nexora.WebApi.Seeding
 
             foreach (var t in tenantUsers)
             {
-                await _authService.RegisterTenantAsync(t);
+                if (!await _context.Users.AnyAsync(x => x.Email == t.Email))
+                {
+                    await _authService.RegisterTenantAsync(t);
+                }
             }
         }
 
