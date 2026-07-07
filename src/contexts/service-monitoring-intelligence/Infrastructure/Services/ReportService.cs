@@ -251,7 +251,7 @@ namespace Nexora.Infrastructure.Services
         private const double WaterSafeFlowLpm = 20.0;
         private const double ElectricalSafeCurrentA = 20.0;
 
-        public async Task<ConsumptionReportDto> GetConsumptionReportAsync(string metric, string range, string? deviceId = null)
+        public async Task<ConsumptionReportDto> GetConsumptionReportAsync(string metric, string range, string? deviceId, long userId)
         {
             metric = (metric ?? "water").Trim().ToLowerInvariant();
             if (metric != "electricity") metric = "water";
@@ -282,9 +282,38 @@ namespace Nexora.Infrastructure.Services
                 HasData = false,
             };
 
-            var baseQuery = _context.TelemetryLogs.AsQueryable();
+            // Retrieve properties linked to this user (landlord or tenant)
+            var propertyIds = new List<long>();
+            var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
+            if (landlord != null)
+            {
+                propertyIds = await _context.Properties
+                    .Where(p => p.LandlordId == landlord.Id)
+                    .Select(p => p.Id)
+                    .ToListAsync();
+            }
+            else
+            {
+                var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.UserId == userId);
+                if (tenant != null)
+                {
+                    propertyIds.Add(tenant.PropertyId);
+                }
+            }
+
+            var allowedDeviceIds = await _context.Devices
+                .Where(d => d.PropertyId != null && propertyIds.Contains(d.PropertyId.Value))
+                .Select(d => d.Id)
+                .ToListAsync();
+
+            var baseQuery = _context.TelemetryLogs.Where(t => allowedDeviceIds.Contains(t.DeviceId));
             if (!string.IsNullOrWhiteSpace(deviceId))
-                baseQuery = baseQuery.Where(t => t.DeviceId == deviceId);
+            {
+                if (allowedDeviceIds.Contains(deviceId))
+                    baseQuery = baseQuery.Where(t => t.DeviceId == deviceId);
+                else
+                    baseQuery = baseQuery.Where(t => false); // Not allowed to view this device
+            }
 
             // Anchor the window to the most recent reading so the report always shows the
             // latest available data (live when the edge is feeding, else the last batch).

@@ -41,13 +41,28 @@ namespace Nexora.WebApi.Controllers
                 return Unauthorized();
             }
 
+            var propertyIds = new List<long>();
             var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
-            if (landlord == null) return NotFound("Landlord profile not found.");
-
-            var propertyIds = await _context.Properties
-                .Where(p => p.LandlordId == landlord.Id)
-                .Select(p => p.Id)
-                .ToListAsync();
+            
+            if (landlord != null)
+            {
+                propertyIds = await _context.Properties
+                    .Where(p => p.LandlordId == landlord.Id)
+                    .Select(p => p.Id)
+                    .ToListAsync();
+            }
+            else
+            {
+                var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.UserId == userId);
+                if (tenant != null)
+                {
+                    propertyIds.Add(tenant.PropertyId);
+                }
+                else
+                {
+                    return Ok(new List<object>()); // Return empty list for unlinked tenants
+                }
+            }
 
             var deviceIds = await _context.Devices
                 .Where(d => d.PropertyId != null && propertyIds.Contains(d.PropertyId.Value))
@@ -104,7 +119,9 @@ namespace Nexora.WebApi.Controllers
                                      a.Type.Contains("Overcurrent") ? t.ElectricityReading : 
                                      a.Type.Contains("Voltage") ? (t.VoltageOk ? 1.0 : 0.0) :
                                      a.Type.Contains("Water") ? t.WaterReading : 0.0)
-                        .FirstOrDefault()
+                        .FirstOrDefault(),
+                    Status = _context.MaintenanceTickets.Any(t => t.AlertId == a.Id && t.Status == Nexora.Domain.Enums.TicketStatus.Resolved) ? "resolved" :
+                             _context.MaintenanceTickets.Any(t => t.AlertId == a.Id) ? "pending" : "active"
                 })
                 .ToListAsync();
 

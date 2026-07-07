@@ -104,7 +104,7 @@ namespace Nexora.WebApi.Controllers
             {
                 var property = await _context.Properties
                     .Include(p => p.Landlord)
-                    .FirstOrDefaultAsync(p => p.PropertyCode == code && p.Landlord.UserId == userId);
+                    .FirstOrDefaultAsync(p => p.PropertyCode == code && (p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId)));
 
                 if (property == null) return NotFound();
 
@@ -136,7 +136,8 @@ namespace Nexora.WebApi.Controllers
 
             var properties = await _context.Properties
                 .Include(p => p.Landlord)
-                .Where(p => p.Landlord.UserId == userId)
+                .Include(p => p.Tenants)
+                .Where(p => p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId))
                 .ToListAsync();
 
             var dtos = new List<PropertyDto>();
@@ -178,7 +179,7 @@ namespace Nexora.WebApi.Controllers
 
             var property = await _context.Properties
                 .Include(p => p.Landlord)
-                .FirstOrDefaultAsync(p => p.Id == id && p.Landlord.UserId == userId);
+                .FirstOrDefaultAsync(p => p.Id == id && (p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId)));
 
             if (property == null) return NotFound();
 
@@ -216,10 +217,10 @@ namespace Nexora.WebApi.Controllers
             if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
 
             var total = await _context.Properties
-                .CountAsync(p => p.Landlord.UserId == userId);
+                .CountAsync(p => p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId));
 
             var protectedCount = await _context.Properties.CountAsync(p =>
-                p.Landlord.UserId == userId &&
+                (p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId)) &&
                 p.Status == PropertyStatus.ACTIVE &&
                 p.IsSecurityModeArmed);
 
@@ -234,7 +235,7 @@ namespace Nexora.WebApi.Controllers
             if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
 
             var total = await _context.Properties
-                .CountAsync(p => p.Landlord.UserId == userId);
+                .CountAsync(p => p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId));
             return Ok(new { Total = total });
         }
 
@@ -246,7 +247,7 @@ namespace Nexora.WebApi.Controllers
             if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
 
             var count = await _context.Properties.CountAsync(p => 
-                p.Landlord.UserId == userId && 
+                (p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId)) && 
                 p.Status == PropertyStatus.ACTIVE &&
                 p.IsSecurityModeArmed);
             

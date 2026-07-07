@@ -32,7 +32,13 @@ namespace Nexora.WebApi.Controllers
         {
             try
             {
-                var report = await _reportService.GetConsumptionReportAsync(metric, range, deviceId);
+                var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (string.IsNullOrEmpty(userIdString) || !long.TryParse(userIdString, out var userId))
+                {
+                    return Unauthorized();
+                }
+
+                var report = await _reportService.GetConsumptionReportAsync(metric, range, deviceId, userId);
                 return Ok(report);
             }
             catch (Exception ex)
