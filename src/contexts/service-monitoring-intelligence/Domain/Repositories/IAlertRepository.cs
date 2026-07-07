@@ -7,5 +7,6 @@ namespace Nexora.Domain.Repositories
     {
         Task AddAsync(Alert alert);
         Task<bool> HasActiveAlertAsync(string deviceId, string type);
+        Task<Alert?> GetLatestActiveAlertAsync(string deviceId, string type);
     }
 }

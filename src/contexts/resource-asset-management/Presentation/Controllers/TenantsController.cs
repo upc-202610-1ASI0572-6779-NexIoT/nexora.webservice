@@ -176,7 +176,26 @@ namespace Nexora.WebApi.Controllers
                 return NotFound("No matching tenant record found for this property.");
             }
 
-            tenant.LinkUser(userId);
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            if (user != null)
+            {
+                if (user.UserableId.HasValue)
+                {
+                    var oldTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Id == user.UserableId.Value);
+                    if (oldTenant != null && oldTenant.PropertyId == 1)
+                    {
+                        _context.Tenants.Remove(oldTenant);
+                    }
+                }
+                
+                tenant.LinkUser(userId);
+                user.SetUserableProfile(tenant.Id);
+            }
+            else
+            {
+                tenant.LinkUser(userId);
+            }
+
             await _context.SaveChangesAsync();
 
             return Ok(new { Message = "Successfully linked to property.", TenantId = tenant.Id });

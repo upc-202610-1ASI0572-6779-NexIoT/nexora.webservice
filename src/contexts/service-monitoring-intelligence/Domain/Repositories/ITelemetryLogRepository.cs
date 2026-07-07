@@ -8,5 +8,6 @@ namespace Nexora.Domain.Repositories
     {
         Task AddAsync(TelemetryLog log);
         Task<DateTime?> GetContinuousFlowStartTimeAsync(string deviceId);
+        Task<TelemetryLog?> GetLatestTelemetryLogAsync(string deviceId);
     }
 }

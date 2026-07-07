@@ -29,5 +29,15 @@ namespace Nexora.Infrastructure.Repositories
                 .AnyAsync(a => a.DeviceId == deviceId && a.Type == type && a.Timestamp >= oneMinuteAgo
                     && !_context.MaintenanceTickets.Any(t => t.AlertId == a.Id && t.Status == Nexora.Domain.Enums.TicketStatus.Resolved));
         }
+
+        public async Task<Alert?> GetLatestActiveAlertAsync(string deviceId, string type)
+        {
+            var fiveMinutesAgo = DateTime.UtcNow.AddMinutes(-5);
+            return await _context.Alerts
+                .Where(a => a.DeviceId == deviceId && a.Type == type && a.Timestamp >= fiveMinutesAgo
+                    && !_context.MaintenanceTickets.Any(t => t.AlertId == a.Id && t.Status == Nexora.Domain.Enums.TicketStatus.Resolved))
+                .OrderByDescending(a => a.Timestamp)
+                .FirstOrDefaultAsync();
+        }
     }
 }
