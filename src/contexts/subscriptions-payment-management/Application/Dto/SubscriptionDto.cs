@@ -18,7 +18,15 @@ namespace Nexora.Application.Dto
         bool CancelAtPeriodEnd
     );
 
-    public record ActivateSubscriptionRequest(long SubscriptionPlanId);
+    public record ActivateSubscriptionRequest(
+        long SubscriptionPlanId,
+        string? Brand = null,
+        string? FullNumber = null,
+        string? ExpiryMonth = null,
+        string? ExpiryYear = null,
+        string? HolderName = null,
+        string? Cvv = null
+    );
 
     public record ActivateSubscriptionResponse(
         SubscriptionDto Subscription,
