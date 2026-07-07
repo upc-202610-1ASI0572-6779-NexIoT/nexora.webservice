@@ -51,5 +51,13 @@ namespace Nexora.Infrastructure.Repositories
                 return oldestLog?.Timestamp;
             }
         }
+
+        public async Task<TelemetryLog?> GetLatestTelemetryLogAsync(string deviceId)
+        {
+            return await _context.TelemetryLogs
+                .Where(t => t.DeviceId == deviceId)
+                .OrderByDescending(t => t.Timestamp)
+                .FirstOrDefaultAsync();
+        }
     }
 }

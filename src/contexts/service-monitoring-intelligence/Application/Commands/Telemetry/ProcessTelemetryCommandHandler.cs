@@ -68,6 +68,9 @@ namespace Nexora.Application.Commands.Telemetry
                     await _deviceRepository.UpdateAsync(device);
                 }
 
+                // Retrieve the latest telemetry log before saving the new one (to evaluate transitions)
+                var latestTelemetry = await _telemetryLogRepository.GetLatestTelemetryLogAsync(payload.DeviceId);
+
                 // 2. Create and persist TelemetryLog (immutable)
                 var telemetryLog = new TelemetryLog(
                     payload.DeviceId,
@@ -88,14 +91,26 @@ namespace Nexora.Application.Commands.Telemetry
                         ? AlertSeverity.Critical 
                         : AlertSeverity.Warning;
 
-                    var alert = new Alert(
-                        severity,
-                        "Gas Threshold Exceeded",
-                        syncDateTime,
-                        payload.DeviceId
-                    );
+                    // Determine previous severity state from the latest telemetry
+                    AlertSeverity? lastSeverity = null;
+                    if (latestTelemetry != null)
+                    {
+                        if (latestTelemetry.GasReading > 300) lastSeverity = AlertSeverity.Critical;
+                        else if (latestTelemetry.GasReading > 100) lastSeverity = AlertSeverity.Warning;
+                    }
 
-                    await _alertRepository.AddAsync(alert);
+                    // Only trigger alert if the severity level has actually transitioned/changed (e.g. Normal -> Warning, Warning -> Critical)
+                    if (lastSeverity != severity)
+                    {
+                        var alert = new Alert(
+                            severity,
+                            "Gas Threshold Exceeded",
+                            syncDateTime,
+                            payload.DeviceId
+                        );
+
+                        await _alertRepository.AddAsync(alert);
+                    }
                 }
 
                 // 4. Evaluate Security Mode rule:
