@@ -5,8 +5,8 @@ namespace Nexora.Domain.Entities
     public class Tenant
     {
         public long Id { get; private set; }
-        public long PropertyId { get; private set; }
-        public Property Property { get; private set; } = null!;
+        public long? PropertyId { get; private set; }
+        public Property? Property { get; private set; }
 
         public long? UserId { get; private set; }
         public User? User { get; private set; }
@@ -25,7 +25,7 @@ namespace Nexora.Domain.Entities
         private Tenant() { }
         #pragma warning restore CS8618
 
-        public Tenant(long propertyId, string firstName, string lastName, string country, string city, string address, string? phoneNumber = null, long? userId = null)
+        public Tenant(string firstName, string lastName, string country, string city, string address, string? phoneNumber = null, long? userId = null, long? propertyId = null)
         {
             if (string.IsNullOrWhiteSpace(firstName)) throw new ArgumentException("First name is required.");
             if (string.IsNullOrWhiteSpace(lastName)) throw new ArgumentException("Last name is required.");

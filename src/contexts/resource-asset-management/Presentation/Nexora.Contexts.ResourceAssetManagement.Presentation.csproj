@@ -9,6 +9,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Application\Nexora.Contexts.ResourceAssetManagement.Application.csproj" />
+    <ProjectReference Include="..\..\identity-access-management\Application\Nexora.Contexts.IdentityAccessManagement.Application.csproj" />
     <ProjectReference Include="..\..\..\shared\Nexora.Shared.Infrastructure\Nexora.Shared.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

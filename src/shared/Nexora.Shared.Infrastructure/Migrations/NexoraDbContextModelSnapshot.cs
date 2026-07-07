@@ -709,7 +709,7 @@ namespace Nexora.Infrastructure.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("phone_number");
 
-                    b.Property<long>("PropertyId")
+                    b.Property<long?>("PropertyId")
                         .HasColumnType("bigint")
                         .HasColumnName("property_id");
 
@@ -946,8 +946,7 @@ namespace Nexora.Infrastructure.Migrations
                     b.HasOne("Nexora.Domain.Entities.Property", "Property")
                         .WithMany("Tenants")
                         .HasForeignKey("PropertyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("Nexora.Domain.Entities.User", "User")
                         .WithOne()

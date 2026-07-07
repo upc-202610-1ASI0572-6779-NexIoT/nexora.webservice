@@ -1,3 +1,4 @@
+using Nexora.Domain.Entities;
 using Nexora.Application.Dto;
 
 namespace Nexora.Application.Services
@@ -8,5 +9,6 @@ namespace Nexora.Application.Services
         Task<AuthResponseDto?> RegisterTenantAsync(RegisterTenantDto dto);
         Task<AuthResponseDto?> LoginAsync(LoginDto loginDto);
         Task ChangePasswordAsync(long userId, string currentPassword, string newPassword);
+        string GenerateJwtToken(User user);
     }
 }

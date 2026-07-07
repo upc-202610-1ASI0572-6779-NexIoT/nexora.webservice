@@ -19,13 +19,13 @@ namespace Nexora.Application.Commands.Tenant
         public async Task<long> Handle(CreateTenantCommand request, CancellationToken cancellationToken)
         {
             var tenant = new Nexora.Domain.Entities.Tenant(
-                request.PropertyId,
                 request.FirstName,
                 request.LastName,
                 request.Country,
                 request.City,
                 request.Address,
-                request.PhoneNumber
+                request.PhoneNumber,
+                propertyId: request.PropertyId
             );
 
             await _tenantRepository.AddAsync(tenant);

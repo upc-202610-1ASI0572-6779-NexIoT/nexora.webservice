@@ -4,11 +4,11 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Nexora.Application.Commands.Tenant;
 using Nexora.Application.Dto;
+using Nexora.Application.Services;
 using Nexora.Infrastructure.Persistence;
 using System.Security.Claims;
 using Nexora.Interface.DTOs;
 using System.Linq;
-using System.Security.Claims;
 using System.Threading.Tasks;
 
 namespace Nexora.WebApi.Controllers
@@ -20,11 +20,13 @@ namespace Nexora.WebApi.Controllers
     {
         private readonly IMediator _mediator;
         private readonly NexoraDbContext _context;
+        private readonly IAuthService _authService;
 
-        public TenantsController(IMediator mediator, NexoraDbContext context)
+        public TenantsController(IMediator mediator, NexoraDbContext context, IAuthService authService)
         {
             _mediator = mediator;
             _context = context;
+            _authService = authService;
         }
 
         [HttpPost]
@@ -177,28 +179,34 @@ namespace Nexora.WebApi.Controllers
             }
 
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
-            if (user != null)
+            if (user == null)
             {
-                if (user.UserableId.HasValue)
+                return Unauthorized();
+            }
+
+            if (user.UserableId.HasValue)
+            {
+                var oldTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Id == user.UserableId.Value);
+                if (oldTenant != null && !oldTenant.PropertyId.HasValue)
                 {
-                    var oldTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Id == user.UserableId.Value);
-                    if (oldTenant != null && oldTenant.PropertyId == 1)
-                    {
-                        _context.Tenants.Remove(oldTenant);
-                    }
+                    _context.Tenants.Remove(oldTenant);
                 }
-                
-                tenant.LinkUser(userId);
-                user.SetUserableProfile(tenant.Id);
             }
-            else
-            {
-                tenant.LinkUser(userId);
-            }
+
+            tenant.LinkUser(userId);
+            user.SetUserableProfile(tenant.Id);
 
             await _context.SaveChangesAsync();
 
-            return Ok(new { Message = "Successfully linked to property.", TenantId = tenant.Id });
+            var token = _authService.GenerateJwtToken(user);
+
+            return Ok(new AuthResponseDto(
+                user.Email,
+                token,
+                user.Id,
+                user.UserableType ?? "Tenant",
+                tenant.Id
+            ));
         }
     }
 

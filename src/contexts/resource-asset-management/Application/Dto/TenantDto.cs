@@ -4,7 +4,7 @@ namespace Nexora.Application.Dto
 {
     public record TenantDto(
         long Id,
-        long PropertyId,
+        long? PropertyId,
         long? UserId,
         string FirstName,
         string LastName,

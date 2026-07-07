@@ -295,9 +295,9 @@ namespace Nexora.Infrastructure.Services
             else
             {
                 var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.UserId == userId);
-                if (tenant != null)
+                if (tenant != null && tenant.PropertyId.HasValue)
                 {
-                    propertyIds.Add(tenant.PropertyId);
+                    propertyIds.Add(tenant.PropertyId.Value);
                 }
             }
 

@@ -92,14 +92,14 @@ namespace Nexora.Application.Services
             else
             {
                 tenant = new Tenant(
-                    dto.PropertyId,
                     dto.FirstName,
                     dto.LastName,
                     dto.Country,
                     dto.City,
                     dto.Address,
                     dto.PhoneNumber,
-                    user.Id
+                    user.Id,
+                    dto.PropertyId
                 );
 
                 await _tenantRepository.AddAsync(tenant);
@@ -165,7 +165,7 @@ namespace Nexora.Application.Services
             await _unitOfWork.SaveChangesAsync();
         }
 
-        private string GenerateJwtToken(User user)
+        public string GenerateJwtToken(User user)
         {
             var jwtSettings = _configuration.GetSection("Jwt");
             var key = Encoding.ASCII.GetBytes(jwtSettings["Key"]!);
