@@ -22,7 +22,7 @@ namespace Nexora.Application.Dto
         string City,
         string Address,
         string? PhoneNumber,
-        long PropertyId,
+        long? PropertyId = null,
         long? ExistingTenantId = null
     );
 

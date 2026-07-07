@@ -325,7 +325,7 @@ namespace Nexora.Infrastructure.Persistence
                 entity.HasKey(t => t.Id);
 
                 entity.Property(t => t.Id).HasColumnName("id");
-                entity.Property(t => t.PropertyId).HasColumnName("property_id").IsRequired();
+                entity.Property(t => t.PropertyId).HasColumnName("property_id"); // nullable: tenant may not be linked yet
                 entity.Property(t => t.UserId).HasColumnName("user_id");
                 entity.Property(t => t.FirstName).HasColumnName("first_name").HasMaxLength(100).IsRequired();
                 entity.Property(t => t.LastName).HasColumnName("last_name").HasMaxLength(100).IsRequired();
@@ -339,7 +339,8 @@ namespace Nexora.Infrastructure.Persistence
                 entity.HasOne(t => t.Property)
                     .WithMany(p => p.Tenants)
                     .HasForeignKey(t => t.PropertyId)
-                    .OnDelete(DeleteBehavior.Cascade);
+                    .OnDelete(DeleteBehavior.Cascade)
+                    .IsRequired(false);
 
                 entity.HasOne(t => t.User)
                     .WithOne()

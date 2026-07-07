@@ -129,7 +129,7 @@ namespace Nexora.WebApi.Seeding
                 {
                     if (await _context.Tenants.AnyAsync(x => x.PhoneNumber == g.Phone)) continue;
 
-                    var tenant = new Tenant(property.Id, g.FirstName, g.LastName, g.Country, g.City, g.Address, g.Phone);
+                    var tenant = new Tenant(g.FirstName, g.LastName, g.Country, g.City, g.Address, g.Phone, propertyId: property.Id);
                     _context.Tenants.Add(tenant);
                 }
             }
