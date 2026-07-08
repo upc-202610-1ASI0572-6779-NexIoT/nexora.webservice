@@ -388,7 +388,8 @@ namespace Nexora.WebApi.Seeding
                     existing.UpdateFirmwareVersion(def.Firmware);
                     _context.Devices.Update(existing);
                 }
-                existing.AssignToProperty(null);
+                existing.AssignToProperty(properties[def.PropertyIdx].Id);
+
             }
             await _context.SaveChangesAsync();
 
