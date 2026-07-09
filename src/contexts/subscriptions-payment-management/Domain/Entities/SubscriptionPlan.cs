@@ -9,15 +9,17 @@ namespace Nexora.Domain.Entities
         public decimal MonthlyPrice { get; private set; }
         public int MaxPropertiesLimit { get; private set; }
         public bool UnlimitedProperties { get; private set; }
+        public string TargetUser { get; private set; } = "landlord";
         public bool IsActive { get; private set; }
 
         private SubscriptionPlan() { }
 
-        public SubscriptionPlan(string name, decimal monthlyPrice, int maxPropertiesLimit, bool unlimitedProperties = false)
+        public SubscriptionPlan(string name, decimal monthlyPrice, int maxPropertiesLimit, string targetUser, bool unlimitedProperties = false)
         {
             Name = name;
             MonthlyPrice = monthlyPrice;
             MaxPropertiesLimit = maxPropertiesLimit;
+            TargetUser = targetUser;
             UnlimitedProperties = unlimitedProperties;
             IsActive = true;
         }

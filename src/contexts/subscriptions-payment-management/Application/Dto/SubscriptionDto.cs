@@ -11,7 +11,8 @@ namespace Nexora.Application.Dto
         string? Tagline = null,
         string? Description = null,
         IReadOnlyList<string>? Features = null,
-        bool IsPopular = false
+        bool IsPopular = false,
+        string? TargetUser = null
     );
 
     /// <summary>Response for creating a Stripe Checkout Session (hosted payment page).</summary>

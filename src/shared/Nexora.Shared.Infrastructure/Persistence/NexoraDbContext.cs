@@ -195,6 +195,7 @@ namespace Nexora.Infrastructure.Persistence
                 entity.Property(s => s.MonthlyPrice).HasColumnName("monthly_price").HasColumnType("decimal(18,2)").IsRequired();
                 entity.Property(s => s.MaxPropertiesLimit).HasColumnName("max_properties_limit").IsRequired();
                 entity.Property(s => s.UnlimitedProperties).HasColumnName("unlimited_properties").HasDefaultValue(false);
+                entity.Property(s => s.TargetUser).HasColumnName("target_user").HasMaxLength(20).HasDefaultValue("landlord").IsRequired();
                 entity.Property(s => s.IsActive).HasColumnName("is_active").HasDefaultValue(true);
 
                 // Subscription plans will be seeded by DataSeeder if absent.

@@ -60,10 +60,16 @@ namespace Nexora.WebApi.Controllers
         }
 
         [HttpGet("plans")]
-        public async Task<IActionResult> GetPlans()
+        public async Task<IActionResult> GetPlans([FromQuery] string? target = null)
         {
-            var plans = await _context.SubscriptionPlans
-                .Where(p => p.IsActive)
+            var query = _context.SubscriptionPlans.Where(p => p.IsActive);
+
+            if (!string.IsNullOrEmpty(target))
+            {
+                query = query.Where(p => p.TargetUser.ToLower() == target.ToLower());
+            }
+
+            var plans = await query
                 .OrderBy(p => p.MonthlyPrice)
                 .ToListAsync();
 
@@ -1302,35 +1308,62 @@ namespace Nexora.WebApi.Controllers
         private static readonly Dictionary<string, (string Tagline, string Description, string[] Features, bool Popular)> PlanMarketing =
             new(StringComparer.OrdinalIgnoreCase)
             {
-                ["Basic"] = (
-                    "CONNECTED LIVING",
-                    "Essential basic features for your day-to-day.",
+                ["landlord_Basic"] = (
+                    "PROPERTY ESSENTIALS",
+                    "Essential features for managing your properties.",
                     new[]
                     {
-                        "IoT control from mobile app",
-                        "Remote On/Off",
-                        "Live device status",
-                        "Basic notifications"
+                        "Hasta 3 propiedades gestionadas",
+                        "Historial de consumo de 3 meses",
+                        "Análisis mensual de consumo",
+                        "Alertas preventivas por web y correo",
+                        "Modo seguridad manual para propiedades vacías",
+                        "Exportación de reportes en PDF"
                     },
                     false),
-                ["Plus"] = (
+                ["landlord_Professional"] = (
                     "SMART PROPERTY MANAGEMENT",
-                    "Total customization and automated energy efficiency.",
+                    "Total control, detailed analytics and priority VIP support.",
                     new[]
                     {
-                        "Scenarios (Night/Savings Mode)",
-                        "Detailed usage history",
-                        "Personalized smart alerts",
-                        "Multi-user configuration",
-                        "Optimized experience without limits"
+                        "Propiedades gestionadas ilimitadas",
+                        "Historial ilimitado e interactivo",
+                        "Análisis por hora, día, semana y mes",
+                        "Alertas push, correo y panel web",
+                        "Panel flotante de emergencia",
+                        "Exportación PDF y Excel",
+                        "Roles, permisos y soporte VIP"
+                    },
+                    true),
+                ["tenant_Basic"] = (
+                    "CONNECTED LIVING",
+                    "Essential basic features for your day-to-day IoT control.",
+                    new[]
+                    {
+                        "Control IoT desde la app móvil",
+                        "Encendido y apagado remoto",
+                        "Estado de dispositivos en vivo",
+                        "Notificaciones básicas"
+                    },
+                    false),
+                ["tenant_Plus"] = (
+                    "ADVANCED COMFORT",
+                    "Automated routines, alerts and predictives expenses.",
+                    new[]
+                    {
+                        "Escenas y rutinas inteligentes",
+                        "Historial de uso detallado",
+                        "Alertas inteligentes personalizadas",
+                        "Estimación predictiva de gastos",
+                        "Configuración multiusuario",
+                        "Alertas de emergencia"
                     },
                     true),
             };
 
         private static SubscriptionPlanDto BuildPlanDto(SubscriptionPlan p)
         {
-            // "Professional" is the legacy name for the Plus tier.
-            var key = p.Name.Equals("Professional", StringComparison.OrdinalIgnoreCase) ? "Plus" : p.Name;
+            var key = $"{p.TargetUser}_{p.Name}";
             PlanMarketing.TryGetValue(key, out var m);
             return new SubscriptionPlanDto(
                 p.Id,
@@ -1341,7 +1374,8 @@ namespace Nexora.WebApi.Controllers
                 m.Tagline,
                 m.Description,
                 m.Features,
-                m.Popular
+                m.Popular,
+                p.TargetUser
             );
         }
     }

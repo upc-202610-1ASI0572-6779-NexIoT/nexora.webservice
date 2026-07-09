@@ -42,15 +42,40 @@ namespace Nexora.WebApi.Seeding
         }
 
         /// <summary>
-        /// Keeps the two subscription plans aligned with the current product spec:
-        /// Basic ($0.99/mo, up to 2 properties) and Plus ($5/mo, unlimited). Idempotent.
+        /// Keeps the four subscription plans aligned with the current product spec:
+        /// Landlord: Basic ($28.91/mo) and Professional ($43.37/mo).
+        /// Tenant: Basic ($0.99/mo) and Plus ($5.00/mo).
+        /// Idempotent.
         /// </summary>
         private async Task SeedOrUpdatePlansAsync()
         {
+            // Landlord Basic
             await _context.Database.ExecuteSqlRawAsync(
-                "UPDATE subscription_plans SET name = 'Basic', monthly_price = 0.99, max_properties_limit = 2, unlimited_properties = FALSE WHERE id = 1");
+                "INSERT INTO subscription_plans (id, name, monthly_price, max_properties_limit, unlimited_properties, target_user, is_active) " +
+                "VALUES (1, 'Basic', 28.91, 3, FALSE, 'landlord', TRUE) " +
+                "ON CONFLICT (id) DO UPDATE SET name = 'Basic', monthly_price = 28.91, max_properties_limit = 3, unlimited_properties = FALSE, target_user = 'landlord'");
+
+            // Landlord Professional
             await _context.Database.ExecuteSqlRawAsync(
-                "UPDATE subscription_plans SET name = 'Plus', monthly_price = 5.00, max_properties_limit = 0, unlimited_properties = TRUE WHERE id = 2");
+                "INSERT INTO subscription_plans (id, name, monthly_price, max_properties_limit, unlimited_properties, target_user, is_active) " +
+                "VALUES (2, 'Professional', 43.37, 0, TRUE, 'landlord', TRUE) " +
+                "ON CONFLICT (id) DO UPDATE SET name = 'Professional', monthly_price = 43.37, max_properties_limit = 0, unlimited_properties = TRUE, target_user = 'landlord'");
+
+            // Tenant Basic
+            await _context.Database.ExecuteSqlRawAsync(
+                "INSERT INTO subscription_plans (id, name, monthly_price, max_properties_limit, unlimited_properties, target_user, is_active) " +
+                "VALUES (3, 'Basic', 0.99, 0, TRUE, 'tenant', TRUE) " +
+                "ON CONFLICT (id) DO UPDATE SET name = 'Basic', monthly_price = 0.99, max_properties_limit = 0, unlimited_properties = TRUE, target_user = 'tenant'");
+
+            // Tenant Plus
+            await _context.Database.ExecuteSqlRawAsync(
+                "INSERT INTO subscription_plans (id, name, monthly_price, max_properties_limit, unlimited_properties, target_user, is_active) " +
+                "VALUES (4, 'Plus', 5.00, 0, TRUE, 'tenant', TRUE) " +
+                "ON CONFLICT (id) DO UPDATE SET name = 'Plus', monthly_price = 5.00, max_properties_limit = 0, unlimited_properties = TRUE, target_user = 'tenant'");
+
+            // Sync serial sequence for plans table
+            await _context.Database.ExecuteSqlRawAsync(
+                "SELECT setval(pg_get_serial_sequence('subscription_plans', 'id'), COALESCE((SELECT MAX(id)+1 FROM subscription_plans), 1), false)");
         }
 
         private async Task SeedLandlordUsersAsync()
