@@ -4,6 +4,9 @@ using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Nexora.Application.Services;
+using Nexora.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using System.Linq;
 
 namespace Nexora.WebApi.Controllers
 {
@@ -12,10 +15,12 @@ namespace Nexora.WebApi.Controllers
     public class ReportsController : ControllerBase
     {
         private readonly IReportService _reportService;
+        private readonly NexoraDbContext _context;
 
-        public ReportsController(IReportService reportService)
+        public ReportsController(IReportService reportService, NexoraDbContext context)
         {
             _reportService = reportService;
+            _context = context;
         }
 
         /// <summary>
@@ -68,6 +73,24 @@ namespace Nexora.WebApi.Controllers
             if (string.IsNullOrWhiteSpace(format))
             {
                 return BadRequest("Format is required (pdf or xlsx).");
+            }
+
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
+            if (landlord == null) return NotFound("Landlord profile not found.");
+
+            var subscription = await _context.Subscriptions
+                .Include(s => s.Plan)
+                .FirstOrDefaultAsync(s => s.LandlordId == landlord.Id);
+
+            if (format.Equals("xlsx", StringComparison.OrdinalIgnoreCase) || format.Equals("excel", StringComparison.OrdinalIgnoreCase))
+            {
+                if (subscription != null && subscription.Plan.Name.Equals("Basic", StringComparison.OrdinalIgnoreCase))
+                {
+                    return BadRequest("Excel export is exclusive to the Professional plan.");
+                }
             }
 
             var utcStartDate = DateTime.SpecifyKind(startDate, DateTimeKind.Utc);
@@ -138,6 +161,18 @@ namespace Nexora.WebApi.Controllers
         {
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+
+            var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
+            if (landlord == null) return NotFound("Landlord profile not found.");
+
+            var subscription = await _context.Subscriptions
+                .Include(s => s.Plan)
+                .FirstOrDefaultAsync(s => s.LandlordId == landlord.Id);
+
+            if (subscription != null && subscription.Plan.Name.Equals("Basic", StringComparison.OrdinalIgnoreCase))
+            {
+                if (months > 3) months = 3;
+            }
 
             try
             {

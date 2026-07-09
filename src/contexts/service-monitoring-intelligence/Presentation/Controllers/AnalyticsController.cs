@@ -36,6 +36,16 @@ namespace Nexora.WebApi.Controllers
                 .FirstOrDefaultAsync(l => l.UserId == userId);
             if (landlord == null) return NotFound("Landlord profile not found.");
 
+            // Enforce plan history limit (3 months for Basic plan)
+            var subscription = await _context.Subscriptions
+                .Include(s => s.Plan)
+                .FirstOrDefaultAsync(s => s.LandlordId == landlord.Id);
+
+            if (subscription != null && subscription.Plan.Name.Equals("Basic", StringComparison.OrdinalIgnoreCase))
+            {
+                if (months > 3) months = 3;
+            }
+
             var properties = await _context.Properties
                 .Where(p => p.LandlordId == landlord.Id)
                 .ToListAsync();
@@ -193,6 +203,16 @@ namespace Nexora.WebApi.Controllers
 
             var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
             if (landlord == null) return NotFound("Landlord profile not found.");
+
+            // Enforce hourly/daily/weekly analysis limit (only available in Professional plan)
+            var subscription = await _context.Subscriptions
+                .Include(s => s.Plan)
+                .FirstOrDefaultAsync(s => s.LandlordId == landlord.Id);
+
+            if (subscription != null && subscription.Plan.Name.Equals("Basic", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest("Live consumption analysis (24h/7d) is exclusive to the Professional plan.");
+            }
 
             var propertyIds = await _context.Properties
                 .Where(p => p.LandlordId == landlord.Id)
