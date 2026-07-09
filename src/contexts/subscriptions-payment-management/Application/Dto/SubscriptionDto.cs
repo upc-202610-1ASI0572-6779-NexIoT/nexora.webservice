@@ -37,7 +37,8 @@ namespace Nexora.Application.Dto
         string? ExpiryMonth = null,
         string? ExpiryYear = null,
         string? HolderName = null,
-        string? Cvv = null
+        string? Cvv = null,
+        string? PaymentMethodId = null
     );
 
     public record ActivateSubscriptionResponse(
@@ -81,11 +82,12 @@ namespace Nexora.Application.Dto
     );
 
     public record UpdatePaymentMethodRequest(
-        string? Brand,
-        string? FullNumber,
-        string? ExpiryMonth,
-        string? ExpiryYear,
-        string? HolderName,
-        string? Cvv
+        string? Brand = null,
+        string? FullNumber = null,
+        string? ExpiryMonth = null,
+        string? ExpiryYear = null,
+        string? HolderName = null,
+        string? Cvv = null,
+        string? PaymentMethodId = null
     );
 }

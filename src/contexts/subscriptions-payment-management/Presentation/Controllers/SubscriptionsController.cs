@@ -415,6 +415,31 @@ namespace Nexora.WebApi.Controllers
                     Console.WriteLine($"Stripe PaymentMethod creation failed: {ex.Message}");
                 }
             }
+            else if (!string.IsNullOrEmpty(request.PaymentMethodId))
+            {
+                pmId = request.PaymentMethodId;
+                try
+                {
+                    var paymentMethodService = new PaymentMethodService();
+                    await paymentMethodService.AttachAsync(pmId, new PaymentMethodAttachOptions
+                    {
+                        Customer = landlord.StripeCustomerId
+                    });
+
+                    var customerService = new CustomerService();
+                    await customerService.UpdateAsync(landlord.StripeCustomerId, new CustomerUpdateOptions
+                    {
+                        InvoiceSettings = new CustomerInvoiceSettingsOptions
+                        {
+                            DefaultPaymentMethod = pmId
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Stripe PaymentMethod attach failed: {ex.Message}");
+                }
+            }
 
             // 3. Stripe Subscription creation (incomplete, waiting for card confirmation)
             var stripeSubscriptionService = new Stripe.SubscriptionService();
@@ -804,13 +829,88 @@ namespace Nexora.WebApi.Controllers
             var landlord = await GetLandlordAsync();
             if (landlord == null) return Unauthorized();
 
+            if (!string.IsNullOrEmpty(request.PaymentMethodId))
+            {
+                try
+                {
+                    var paymentMethodService = new PaymentMethodService();
+                    var pm = await paymentMethodService.GetAsync(request.PaymentMethodId);
+
+                    await paymentMethodService.AttachAsync(pm.Id, new PaymentMethodAttachOptions
+                    {
+                        Customer = landlord.StripeCustomerId
+                    });
+
+                    var customerService = new CustomerService();
+                    await customerService.UpdateAsync(landlord.StripeCustomerId, new CustomerUpdateOptions
+                    {
+                        InvoiceSettings = new CustomerInvoiceSettingsOptions
+                        {
+                            DefaultPaymentMethod = pm.Id
+                        }
+                    });
+
+                    var brand = pm.Card?.Brand ?? "Visa";
+                    var lastFour = pm.Card?.Last4 ?? "4242";
+                    var expMonth = pm.Card?.ExpMonth.ToString().PadLeft(2, '0') ?? "12";
+                    var expYearStr = pm.Card?.ExpYear.ToString() ?? "29";
+                    var expYear = expYearStr.Length > 2 ? expYearStr.Substring(expYearStr.Length - 2) : expYearStr;
+                    var holderName = request.HolderName ?? pm.BillingDetails?.Name ?? "Cardholder User";
+
+                    var existingCard = await _context.SavedCards
+                        .FirstOrDefaultAsync(c => c.LandlordId == landlord.Id);
+
+                    if (existingCard != null)
+                    {
+                        existingCard.Update(
+                            brand,
+                            $"************{lastFour}",
+                            expMonth,
+                            expYear,
+                            holderName,
+                            "***"
+                        );
+                    }
+                    else
+                    {
+                        existingCard = new SavedCard(
+                            landlord.Id,
+                            brand,
+                            $"************{lastFour}",
+                            expMonth,
+                            expYear,
+                            holderName,
+                            "***"
+                        );
+                        _context.SavedCards.Add(existingCard);
+                    }
+
+                    await _context.SaveChangesAsync();
+
+                    return Ok(new PaymentMethodDetailDto(
+                        existingCard.Id,
+                        existingCard.Brand,
+                        existingCard.LastFour,
+                        existingCard.FullNumber,
+                        existingCard.ExpiryMonth,
+                        existingCard.ExpiryYear,
+                        existingCard.HolderName,
+                        existingCard.Cvv
+                    ));
+                }
+                catch (Exception ex)
+                {
+                    return BadRequest($"Stripe error: {ex.Message}");
+                }
+            }
+
             // If a card already exists, update it instead of creating duplicates
-            var existingCard = await _context.SavedCards
+            var existingCardLocal = await _context.SavedCards
                 .FirstOrDefaultAsync(c => c.LandlordId == landlord.Id);
 
-            if (existingCard != null)
+            if (existingCardLocal != null)
             {
-                existingCard.Update(
+                existingCardLocal.Update(
                     request.Brand,
                     request.FullNumber,
                     request.ExpiryMonth,
@@ -820,14 +920,14 @@ namespace Nexora.WebApi.Controllers
                 );
                 await _context.SaveChangesAsync();
                 return Ok(new PaymentMethodDetailDto(
-                    existingCard.Id,
-                    existingCard.Brand,
-                    existingCard.LastFour,
-                    existingCard.FullNumber,
-                    existingCard.ExpiryMonth,
-                    existingCard.ExpiryYear,
-                    existingCard.HolderName,
-                    existingCard.Cvv
+                    existingCardLocal.Id,
+                    existingCardLocal.Brand,
+                    existingCardLocal.LastFour,
+                    existingCardLocal.FullNumber,
+                    existingCardLocal.ExpiryMonth,
+                    existingCardLocal.ExpiryYear,
+                    existingCardLocal.HolderName,
+                    existingCardLocal.Cvv
                 ));
             }
 
@@ -889,6 +989,136 @@ namespace Nexora.WebApi.Controllers
                 card.HolderName,
                 card.Cvv
             ));
+        }
+
+        [Authorize]
+        [HttpPut("payment-method")]
+        public async Task<IActionResult> UpdatePaymentMethodSingular([FromBody] UpdatePaymentMethodRequest request)
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null) return Unauthorized();
+
+            if (string.IsNullOrEmpty(request.PaymentMethodId))
+            {
+                return BadRequest("PaymentMethodId is required.");
+            }
+
+            try
+            {
+                var paymentMethodService = new PaymentMethodService();
+                var pm = await paymentMethodService.GetAsync(request.PaymentMethodId);
+
+                await paymentMethodService.AttachAsync(pm.Id, new PaymentMethodAttachOptions
+                {
+                    Customer = landlord.StripeCustomerId
+                });
+
+                var customerService = new CustomerService();
+                await customerService.UpdateAsync(landlord.StripeCustomerId, new CustomerUpdateOptions
+                {
+                    InvoiceSettings = new CustomerInvoiceSettingsOptions
+                    {
+                        DefaultPaymentMethod = pm.Id
+                    }
+                });
+
+                var brand = pm.Card?.Brand ?? "Visa";
+                var lastFour = pm.Card?.Last4 ?? "4242";
+                var expMonth = pm.Card?.ExpMonth.ToString().PadLeft(2, '0') ?? "12";
+                var expYearStr = pm.Card?.ExpYear.ToString() ?? "29";
+                var expYear = expYearStr.Length > 2 ? expYearStr.Substring(expYearStr.Length - 2) : expYearStr;
+                var holderName = request.HolderName ?? pm.BillingDetails?.Name ?? "Cardholder User";
+
+                var card = await _context.SavedCards.FirstOrDefaultAsync(c => c.LandlordId == landlord.Id);
+                if (card != null)
+                {
+                    card.Update(
+                        brand,
+                        $"************{lastFour}",
+                        expMonth,
+                        expYear,
+                        holderName,
+                        "***"
+                    );
+                }
+                else
+                {
+                    card = new SavedCard(
+                        landlord.Id,
+                        brand,
+                        $"************{lastFour}",
+                        expMonth,
+                        expYear,
+                        holderName,
+                        "***"
+                    );
+                    _context.SavedCards.Add(card);
+                }
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new PaymentMethodDetailDto(
+                    card.Id,
+                    card.Brand,
+                    card.LastFour,
+                    card.FullNumber,
+                    card.ExpiryMonth,
+                    card.ExpiryYear,
+                    card.HolderName,
+                    card.Cvv
+                ));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"Stripe error: {ex.Message}");
+            }
+        }
+
+        [Authorize]
+        [HttpPost("{subscriptionId:long}/cancel")]
+        public async Task<IActionResult> CancelSubscription(long subscriptionId)
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null) return Unauthorized();
+
+            var subscription = await _subscriptionRepository.GetByIdAsync(subscriptionId);
+            if (subscription == null || subscription.LandlordId != landlord.Id)
+                return NotFound("Subscription not found.");
+
+            if (subscription.Status != SubscriptionStatus.Active && subscription.Status != SubscriptionStatus.PastDue)
+                return BadRequest($"Cannot cancel subscription in status {subscription.Status}.");
+
+            if (!string.IsNullOrEmpty(subscription.StripeSubscriptionId))
+            {
+                try
+                {
+                    var stripeSubSvc = new Stripe.SubscriptionService();
+                    await stripeSubSvc.UpdateAsync(subscription.StripeSubscriptionId, new Stripe.SubscriptionUpdateOptions
+                    {
+                        CancelAtPeriodEnd = true
+                    });
+                }
+                catch (StripeException ex)
+                {
+                    return StatusCode(502, new { message = $"Stripe error: {ex.Message}" });
+                }
+            }
+
+            subscription.Cancel();
+
+            var evt = new SubscriptionEvent(subscription.Id, "Subscription Cancelled",
+                $"Cancelled at period end: {subscription.CurrentPeriodEnd:yyyy-MM-dd}.");
+
+            _context.SubscriptionEvents.Add(evt);
+            await _subscriptionRepository.UpdateAsync(subscription);
+            await _unitOfWork.SaveChangesAsync();
+
+            var updated = await _subscriptionRepository.GetByIdAsync(subscription.Id);
+            return Ok(new
+            {
+                message = "Subscription will be cancelled at period end.",
+                subscription = MapToDto(updated!)
+            });
         }
 
         [Authorize]
