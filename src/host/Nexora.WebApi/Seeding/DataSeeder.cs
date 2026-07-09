@@ -485,7 +485,7 @@ namespace Nexora.WebApi.Seeding
             await _context.SaveChangesAsync();
 
             // ── Telemetry (yearly, hourly) ──────────────────────────
-            if (!await _context.TelemetryLogs.AnyAsync())
+            if (!await _context.TelemetryLogs.AnyAsync(t => t.DeviceId == "water-safety-unit-apt-402"))
             {
                 var rand = new Random();
                 var logsList = new List<TelemetryLog>();
@@ -535,7 +535,7 @@ namespace Nexora.WebApi.Seeding
             }
 
             // ── Alerts & Tickets ────────────────────────────────────
-            if (!await _context.Alerts.AnyAsync())
+            if (!await _context.Alerts.AnyAsync(a => a.DeviceId == "water-safety-unit-apt-402"))
             {
                 // 1. Historical resolved overcurrent alert (15 days ago)
                 var alert1 = new Alert(AlertSeverity.Critical, "Overcurrent Alert", DateTime.UtcNow.AddDays(-15), "voltage-safety-unit-apt-402");
