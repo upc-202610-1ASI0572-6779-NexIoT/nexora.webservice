@@ -181,6 +181,72 @@ namespace Nexora.WebApi.Seeding
                     await _authService.RegisterTenantAsync(t);
                 }
             }
+
+            var now = DateTime.UtcNow;
+            var tenantPlusPlan = await _context.SubscriptionPlans.FindAsync(4L); // Tenant Plus ($5.00/mo)
+            var tenantBasicPlan = await _context.SubscriptionPlans.FindAsync(3L); // Tenant Basic ($0.99/mo)
+
+            foreach (var email in new[] { "srt0808@nexora.com", "ana.rodriguez@nexora.com", "carlos.lopez@nexora.com" })
+            {
+                var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
+                if (user == null) continue;
+
+                // 1. Ensure Landlord/Billing profile exists
+                var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == user.Id);
+                if (landlord == null)
+                {
+                    landlord = new Landlord(
+                        user.Id,
+                        email == "srt0808@nexora.com" ? "Sara" : (email == "ana.rodriguez@nexora.com" ? "Ana" : "Carlos"),
+                        email == "srt0808@nexora.com" ? "Torres" : (email == "ana.rodriguez@nexora.com" ? "Rodríguez" : "López"),
+                        "Perú",
+                        "Lima",
+                        "Av. Javier Prado 210, San Isidro",
+                        email == "srt0808@nexora.com" ? "+51987654001" : (email == "ana.rodriguez@nexora.com" ? "+51987654002" : "+525598765432")
+                    );
+                    landlord.SetStripeCustomerId($"cus_T{Guid.NewGuid().ToString("N")[..12]}");
+                    
+                    _context.Landlords.Add(landlord);
+                    await _context.SaveChangesAsync();
+                }
+
+                // 2. Ensure Active Subscription exists
+                var subscription = await _context.Subscriptions.FirstOrDefaultAsync(s => s.LandlordId == landlord.Id);
+                if (subscription == null)
+                {
+                    var plan = email == "srt0808@nexora.com" ? tenantPlusPlan : tenantBasicPlan;
+                    if (plan != null)
+                    {
+                        subscription = new Subscription(landlord.Id, plan.Id, now.AddMonths(-6), now.AddMonths(1));
+                        _context.Subscriptions.Add(subscription);
+                        await _context.SaveChangesAsync();
+
+                        // 3. Seed historical invoices and payments
+                        for (int i = 0; i < 6; i++)
+                        {
+                            var dueDate = now.AddMonths(-6 + i).AddDays(7);
+                            var inv = new Invoice(subscription.Id, plan.MonthlyPrice, dueDate);
+                            _context.Invoices.Add(inv);
+                            await _context.SaveChangesAsync();
+
+                            await _context.Database.ExecuteSqlRawAsync(
+                                "UPDATE invoices SET created_at = {0}, status = 'Paid' WHERE id = {1}",
+                                now.AddMonths(-6 + i).AddDays(1), inv.Id
+                            );
+
+                            var payment = new Payment(inv.Id, inv.Amount, "stripe", $"pi_3T{Guid.NewGuid().ToString("N")[..12]}");
+                            payment.Succeed();
+                            _context.Payments.Add(payment);
+                            await _context.SaveChangesAsync();
+
+                            await _context.Database.ExecuteSqlRawAsync(
+                                "UPDATE payments SET paid_at = {0} WHERE id = {1}",
+                                dueDate.AddDays(1), payment.Id
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         private async Task SeedSubscriptionsDataAsync()
@@ -419,16 +485,88 @@ namespace Nexora.WebApi.Seeding
             await _context.SaveChangesAsync();
 
             // ── Telemetry (yearly, hourly) ──────────────────────────
-            // Left completely empty as requested.
             if (!await _context.TelemetryLogs.AnyAsync())
             {
+                var rand = new Random();
+                var logsList = new List<TelemetryLog>();
+                
+                // We'll seed logs for the 3 devices of property 0 (srt0808@nexora.com's property):
+                // "water-safety-unit-apt-402", "voltage-safety-unit-apt-402", "gas-safety-unit-apt-402"
+                var targetDeviceIds = new[] { "water-safety-unit-apt-402", "voltage-safety-unit-apt-402", "gas-safety-unit-apt-402" };
+                
+                // Generate readings every 3 hours for the last 35 days
+                var startTime = DateTime.UtcNow.AddDays(-35);
+                var endTime = DateTime.UtcNow;
+                
+                for (var time = startTime; time <= endTime; time = time.AddHours(3))
+                {
+                    foreach (var deviceId in targetDeviceIds)
+                    {
+                        double water = 0;
+                        double gas = 0;
+                        double electricity = 0;
+                        bool voltageOk = true;
+
+                        if (deviceId == "water-safety-unit-apt-402")
+                        {
+                            // Water flow reading in L/min. Some periods have zero flow.
+                            bool isIdle = rand.Next(1, 10) > 7; 
+                            water = isIdle ? 0.0 : rand.NextDouble() * 12.0 + 3.0;
+                        }
+                        else if (deviceId == "voltage-safety-unit-apt-402")
+                        {
+                            // Electrical current in Amperes.
+                            bool isIdle = rand.Next(1, 10) > 8;
+                            electricity = isIdle ? 0.2 : rand.NextDouble() * 8.0 + 1.5;
+                            voltageOk = rand.Next(1, 100) > 1; // 1% chance of voltage dip
+                        }
+                        else if (deviceId == "gas-safety-unit-apt-402")
+                        {
+                            // Gas reading in ppm.
+                            gas = rand.NextDouble() * 15.0 + 5.0;
+                        }
+
+                        logsList.Add(new TelemetryLog(deviceId, water, gas, false, electricity, voltageOk, time));
+                    }
+                }
+                
+                _context.TelemetryLogs.AddRange(logsList);
                 await _context.SaveChangesAsync();
             }
 
             // ── Alerts & Tickets ────────────────────────────────────
-            // Left completely empty as requested so alerts are clean and configured from interface.
             if (!await _context.Alerts.AnyAsync())
             {
+                // 1. Historical resolved overcurrent alert (15 days ago)
+                var alert1 = new Alert(AlertSeverity.Critical, "Overcurrent Alert", DateTime.UtcNow.AddDays(-15), "voltage-safety-unit-apt-402");
+                _context.Alerts.Add(alert1);
+                await _context.SaveChangesAsync();
+                
+                var ticket1 = new MaintenanceTicket(alert1);
+                ticket1.Assign("Técnico Electricista - Juan R.");
+                ticket1.Resolve();
+                _context.MaintenanceTickets.Add(ticket1);
+                await _context.SaveChangesAsync();
+
+                // 2. Historical resolved gas leak alert (5 days ago)
+                var alert2 = new Alert(AlertSeverity.Critical, "Gas Leak Alert", DateTime.UtcNow.AddDays(-5), "gas-safety-unit-apt-402");
+                _context.Alerts.Add(alert2);
+                await _context.SaveChangesAsync();
+
+                var ticket2 = new MaintenanceTicket(alert2);
+                ticket2.Assign("Técnico Gasista - Pedro M.");
+                ticket2.Resolve();
+                _context.MaintenanceTickets.Add(ticket2);
+                await _context.SaveChangesAsync();
+
+                // 3. Current active abnormal water flow alert (2 hours ago)
+                var alert3 = new Alert(AlertSeverity.Warning, "Abnormal water flow", DateTime.UtcNow.AddHours(-2), "water-safety-unit-apt-402");
+                _context.Alerts.Add(alert3);
+                await _context.SaveChangesAsync();
+
+                var ticket3 = new MaintenanceTicket(alert3);
+                ticket3.Assign("Plomero de Emergencia");
+                _context.MaintenanceTickets.Add(ticket3);
                 await _context.SaveChangesAsync();
             }
         }
