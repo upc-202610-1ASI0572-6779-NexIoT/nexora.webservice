@@ -1287,7 +1287,27 @@ namespace Nexora.WebApi.Controllers
         {
             var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (!long.TryParse(userIdString, out var userId)) return null;
-            return await _landlordRepository.GetByUserIdAsync(userId);
+
+            var landlord = await _landlordRepository.GetByUserIdAsync(userId);
+            if (landlord == null)
+            {
+                var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.UserId == userId);
+                if (tenant != null)
+                {
+                    landlord = new Landlord(
+                        userId,
+                        tenant.FirstName,
+                        tenant.LastName,
+                        tenant.Country,
+                        tenant.City,
+                        tenant.Address,
+                        tenant.PhoneNumber
+                    );
+                    _context.Landlords.Add(landlord);
+                    await _context.SaveChangesAsync();
+                }
+            }
+            return landlord;
         }
 
         private static SubscriptionDto MapToDto(LocalSubscription s)
