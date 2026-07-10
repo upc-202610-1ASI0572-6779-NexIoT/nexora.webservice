@@ -284,20 +284,23 @@ namespace Nexora.Infrastructure.Services
 
             // Retrieve properties linked to this user (landlord or tenant)
             var propertyIds = new List<long>();
-            var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
-            if (landlord != null)
+            var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.UserId == userId);
+            if (tenant != null)
             {
-                propertyIds = await _context.Properties
-                    .Where(p => p.LandlordId == landlord.Id)
-                    .Select(p => p.Id)
-                    .ToListAsync();
+                if (tenant.PropertyId.HasValue)
+                {
+                    propertyIds.Add(tenant.PropertyId.Value);
+                }
             }
             else
             {
-                var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.UserId == userId);
-                if (tenant != null && tenant.PropertyId.HasValue)
+                var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
+                if (landlord != null)
                 {
-                    propertyIds.Add(tenant.PropertyId.Value);
+                    propertyIds = await _context.Properties
+                        .Where(p => p.LandlordId == landlord.Id)
+                        .Select(p => p.Id)
+                        .ToListAsync();
                 }
             }
 

@@ -42,25 +42,28 @@ namespace Nexora.WebApi.Controllers
             }
 
             var propertyIds = new List<long>();
-            var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
+            var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.UserId == userId);
             
-            if (landlord != null)
+            if (tenant != null)
             {
-                propertyIds = await _context.Properties
-                    .Where(p => p.LandlordId == landlord.Id)
-                    .Select(p => p.Id)
-                    .ToListAsync();
-            }
-            else
-            {
-                var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.UserId == userId);
-                if (tenant != null && tenant.PropertyId.HasValue)
+                if (tenant.PropertyId.HasValue)
                 {
                     propertyIds.Add(tenant.PropertyId.Value);
                 }
                 else
                 {
                     return Ok(new List<object>()); // Return empty list for unlinked tenants
+                }
+            }
+            else
+            {
+                var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
+                if (landlord != null)
+                {
+                    propertyIds = await _context.Properties
+                        .Where(p => p.LandlordId == landlord.Id)
+                        .Select(p => p.Id)
+                        .ToListAsync();
                 }
             }
 

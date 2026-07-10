@@ -30,22 +30,12 @@ namespace Nexora.WebApi.Controllers
             if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
 
             var propertyIds = new List<long>();
-
-            var landlord = await _context.Landlords
-                .FirstOrDefaultAsync(l => l.UserId == userId);
+            var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.UserId == userId);
+            bool isTenant = tenant != null;
             
-            if (landlord != null)
+            if (isTenant)
             {
-                propertyIds = await _context.Properties
-                    .Where(p => p.LandlordId == landlord.Id)
-                    .Select(p => p.Id)
-                    .ToListAsync();
-            }
-            else
-            {
-                var tenant = await _context.Tenants
-                    .FirstOrDefaultAsync(t => t.UserId == userId);
-                if (tenant != null && tenant.PropertyId.HasValue)
+                if (tenant!.PropertyId.HasValue)
                 {
                     propertyIds.Add(tenant.PropertyId.Value);
                 }
@@ -54,9 +44,20 @@ namespace Nexora.WebApi.Controllers
                     return Ok(new List<object>()); // Return empty list for unlinked tenants
                 }
             }
+            else
+            {
+                var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
+                if (landlord != null)
+                {
+                    propertyIds = await _context.Properties
+                        .Where(p => p.LandlordId == landlord.Id)
+                        .Select(p => p.Id)
+                        .ToListAsync();
+                }
+            }
 
             var devices = await _context.Devices
-                .Where(d => landlord != null 
+                .Where(d => !isTenant 
                     ? (d.PropertyId == null || propertyIds.Contains(d.PropertyId.Value))
                     : (d.PropertyId != null && propertyIds.Contains(d.PropertyId.Value)))
                 .Select(d => new {
@@ -106,22 +107,11 @@ namespace Nexora.WebApi.Controllers
             if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
 
             var propertyIds = new List<long>();
-
-            var landlord = await _context.Landlords
-                .FirstOrDefaultAsync(l => l.UserId == userId);
+            var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.UserId == userId);
             
-            if (landlord != null)
+            if (tenant != null)
             {
-                propertyIds = await _context.Properties
-                    .Where(p => p.LandlordId == landlord.Id)
-                    .Select(p => p.Id)
-                    .ToListAsync();
-            }
-            else
-            {
-                var tenant = await _context.Tenants
-                    .FirstOrDefaultAsync(t => t.UserId == userId);
-                if (tenant != null && tenant.PropertyId.HasValue)
+                if (tenant.PropertyId.HasValue)
                 {
                     propertyIds.Add(tenant.PropertyId.Value);
                 }
@@ -133,6 +123,17 @@ namespace Nexora.WebApi.Controllers
                         activeAlerts = "0",
                         firmwareDrift = "0"
                     });
+                }
+            }
+            else
+            {
+                var landlord = await _context.Landlords.FirstOrDefaultAsync(l => l.UserId == userId);
+                if (landlord != null)
+                {
+                    propertyIds = await _context.Properties
+                        .Where(p => p.LandlordId == landlord.Id)
+                        .Select(p => p.Id)
+                        .ToListAsync();
                 }
             }
 
