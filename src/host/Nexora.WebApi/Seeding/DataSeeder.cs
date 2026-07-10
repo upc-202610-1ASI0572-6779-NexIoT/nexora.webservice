@@ -569,6 +569,31 @@ namespace Nexora.WebApi.Seeding
                 _context.MaintenanceTickets.Add(ticket3);
                 await _context.SaveChangesAsync();
             }
+
+            // ── Device System Logs ──────────────────────────────────
+            if (!await _context.DeviceSystemLogs.AnyAsync())
+            {
+                var systemLogs = new List<DeviceSystemLog>
+                {
+                    // water-safety-unit-apt-402
+                    new DeviceSystemLog("water-safety-unit-apt-402", "success", "Calibration Successful", "Internal sensor range adjusted to ±0.2°C.", now.AddMinutes(-10)),
+                    new DeviceSystemLog("water-safety-unit-apt-402", "warning", "Fringe Signal Detected", "RSSI dropped below -75dBm for 12 seconds.", now.AddMinutes(-90)),
+                    new DeviceSystemLog("water-safety-unit-apt-402", "info", "Routine Heartbeat", "System status report sent to main gateway.", now.AddMinutes(-240)),
+
+                    // voltage-safety-unit-apt-402
+                    new DeviceSystemLog("voltage-safety-unit-apt-402", "warning", "Voltage Spike Detected", "Voltage reached 245V for 0.5s.", now.AddMinutes(-15)),
+                    new DeviceSystemLog("voltage-safety-unit-apt-402", "info", "Power Cycle Initiated", "Manual reboot triggered by landlord.", now.AddMinutes(-120)),
+                    new DeviceSystemLog("voltage-safety-unit-apt-402", "success", "Calibration Successful", "Voltage sensor calibrated to baseline.", now.AddMinutes(-300)),
+
+                    // gas-safety-unit-apt-402
+                    new DeviceSystemLog("gas-safety-unit-apt-402", "danger", "Gas Leak Warning", "Gas reading reached 25 ppm.", now.AddMinutes(-20)),
+                    new DeviceSystemLog("gas-safety-unit-apt-402", "success", "Sensor Pre-heat Complete", "Chamber reached operational temperature of 120°C.", now.AddMinutes(-150)),
+                    new DeviceSystemLog("gas-safety-unit-apt-402", "info", "Routine Heartbeat", "System status report sent to main gateway.", now.AddMinutes(-360))
+                };
+
+                _context.DeviceSystemLogs.AddRange(systemLogs);
+                await _context.SaveChangesAsync();
+            }
         }
     }
 }

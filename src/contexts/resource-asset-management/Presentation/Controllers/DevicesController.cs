@@ -275,9 +275,55 @@ namespace Nexora.WebApi.Controllers
 
             return Ok(new { message = $"Command {request.Command} successfully queued for device {id}." });
         }
+
+        [HttpGet("{id}/logs")]
+        public async Task<IActionResult> GetDeviceLogs(string id)
+        {
+            var device = await _context.Devices.FirstOrDefaultAsync(d => d.Id == id);
+            if (device == null) return NotFound("Device not found.");
+
+            var logs = await _context.DeviceSystemLogs
+                .Where(l => l.DeviceId == id)
+                .OrderByDescending(l => l.Timestamp)
+                .Select(l => new {
+                    l.Id,
+                    l.Type,
+                    l.Title,
+                    l.Message,
+                    l.Timestamp
+                })
+                .ToListAsync();
+
+            return Ok(logs);
+        }
+
+        [HttpPost("{id}/logs")]
+        public async Task<IActionResult> CreateDeviceLog(string id, [FromBody] CreateDeviceLogRequest request)
+        {
+            var device = await _context.Devices.FirstOrDefaultAsync(d => d.Id == id);
+            if (device == null) return NotFound("Device not found.");
+
+            if (string.IsNullOrWhiteSpace(request.Type) || string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Message))
+            {
+                return BadRequest("Type, Title, and Message are required.");
+            }
+
+            var log = new Nexora.Domain.Entities.DeviceSystemLog(id, request.Type, request.Title, request.Message, DateTime.UtcNow);
+            _context.DeviceSystemLogs.Add(log);
+            await _context.SaveChangesAsync();
+
+            return Ok(new {
+                log.Id,
+                log.Type,
+                log.Title,
+                log.Message,
+                log.Timestamp
+            });
+        }
     }
 
     public record AssignDeviceRequest(long? PropertyId);
     public record RegisterDeviceRequest(string Id, string? Name, long? PropertyId, string? MacAddress);
     public record DeviceCommandRequest(string Command);
+    public record CreateDeviceLogRequest(string Type, string Title, string Message);
 }

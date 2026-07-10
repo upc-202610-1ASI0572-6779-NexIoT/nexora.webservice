@@ -8,6 +8,7 @@ namespace Nexora.Infrastructure.Persistence
     {
         public DbSet<Device> Devices => Set<Device>();
         public DbSet<TelemetryLog> TelemetryLogs => Set<TelemetryLog>();
+        public DbSet<DeviceSystemLog> DeviceSystemLogs => Set<DeviceSystemLog>();
         public DbSet<Alert> Alerts => Set<Alert>();
         public DbSet<MaintenanceTicket> MaintenanceTickets => Set<MaintenanceTicket>();
         public DbSet<Property> Properties => Set<Property>();
@@ -170,6 +171,23 @@ namespace Nexora.Infrastructure.Persistence
                 entity.HasOne(a => a.Device)
                     .WithMany()
                     .HasForeignKey(a => a.DeviceId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<DeviceSystemLog>(entity =>
+            {
+                entity.ToTable("device_system_logs");
+                entity.HasKey(l => l.Id);
+                entity.Property(l => l.Id).HasColumnName("id");
+                entity.Property(l => l.DeviceId).HasColumnName("device_id").HasMaxLength(100).IsRequired();
+                entity.Property(l => l.Type).HasColumnName("type").HasMaxLength(50).IsRequired();
+                entity.Property(l => l.Title).HasColumnName("title").HasMaxLength(150).IsRequired();
+                entity.Property(l => l.Message).HasColumnName("message").HasMaxLength(500).IsRequired();
+                entity.Property(l => l.Timestamp).HasColumnName("timestamp").HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                entity.HasOne(l => l.Device)
+                    .WithMany()
+                    .HasForeignKey(l => l.DeviceId)
                     .OnDelete(DeleteBehavior.Cascade);
             });
 
