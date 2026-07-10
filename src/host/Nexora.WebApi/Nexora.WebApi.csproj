@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RollForward>Major</RollForward>
     <UserSecretsId>5c0934bf-5aa6-4dfc-a6b6-8d62227bd3c8</UserSecretsId>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

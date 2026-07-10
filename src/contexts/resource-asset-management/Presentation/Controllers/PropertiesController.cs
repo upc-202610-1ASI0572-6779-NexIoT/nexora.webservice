@@ -1,38 +1,47 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Localization;
 using Nexora.Application.Commands.Property;
+using Nexora.Application.Dto;
 using Nexora.Domain.Enums;
 using Nexora.Infrastructure.Persistence;
+using Nexora.Shared.Domain.Api;
 using Nexora.WebApi.DTOs;
-using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using Nexora.Shared.Domain.Resources;
+using Swashbuckle.AspNetCore.Annotations;
 
 namespace Nexora.WebApi.Controllers
 {
     [ApiController]
     [Route("api/v1/properties")]
     [Authorize]
+    [SwaggerTag("Property Management")]
     public class PropertiesController : ControllerBase
     {
         private readonly IMediator _mediator;
         private readonly NexoraDbContext _context;
+        private readonly IStringLocalizer<SharedMessages> _localizer;
 
-        public PropertiesController(IMediator mediator, NexoraDbContext context)
+        public PropertiesController(IMediator mediator, NexoraDbContext context, IStringLocalizer<SharedMessages> localizer)
         {
             _mediator = mediator;
             _context = context;
+            _localizer = localizer;
         }
 
         [HttpPost]
+        [SwaggerOperation(Summary = "Create a property", Description = "Creates a new property record for the authenticated landlord.")]
+        [ProducesResponseType(typeof(long), StatusCodes.Status201Created)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
         public async Task<IActionResult> Create([FromBody] CreatePropertyRequest request)
         {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+            var userId = User.GetUserId();
+            if (userId == null)
+                return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
             try
             {
@@ -44,69 +53,37 @@ namespace Nexora.WebApi.Controllers
                     request.City,
                     request.Address,
                     request.IsSecurityModeArmed,
-                    userId
+                    userId.Value
                 );
                 var id = await _mediator.Send(command);
-                return CreatedAtAction(nameof(GetById), new { id }, id);
+                return CreatedAtAction(nameof(GetById), new { propertyId = id }, id);
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(new ErrorResponse("BadRequest", ex.Message));
             }
         }
 
-        [HttpPatch("{id}/status")]
-        public async Task<IActionResult> UpdateStatus(long id, [FromBody] PropertyStatus status)
-        {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
-
-            var owned = await _context.Properties
-                .AnyAsync(p => p.Id == id && p.Landlord.UserId == userId);
-            if (!owned) return NotFound();
-
-            var command = new UpdatePropertyStatusCommand(id, status);
-            var result = await _mediator.Send(command);
-            if (!result) return NotFound();
-            return NoContent();
-        }
-
-        private async Task<int?> CalculateHealthScoreAsync(long propertyId)
-        {
-            var devices = await _context.Devices
-                .Where(d => d.PropertyId == propertyId)
-                .ToListAsync();
-
-            if (!devices.Any()) return null;
-
-            var offlineCount = devices.Count(d => d.ConnectionStatus == ConnectionStatus.Offline);
-
-            var deviceIds = devices.Select(d => d.Id).ToList();
-            var criticalAlertCount = await _context.Alerts
-                .Where(a => deviceIds.Contains(a.DeviceId) && 
-                            a.Severity == AlertSeverity.Critical && 
-                            a.Timestamp >= DateTime.UtcNow.AddDays(-1))
-                .Select(a => new { a.DeviceId, a.Type })
-                .Distinct()
-                .CountAsync();
-
-            int score = 100 - (offlineCount * 30) - (criticalAlertCount * 40);
-            return Math.Max(0, Math.Min(100, score));
-        }
-
         [HttpGet]
+        [SwaggerOperation(Summary = "List properties", Description = "Returns all properties accessible to the user. Use ?code= to filter by property code.")]
+        [ProducesResponseType(typeof(List<PropertyDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(PropertyDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetAll([FromQuery] string? code = null)
         {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+            var userId = User.GetUserId();
+            if (userId == null)
+                return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
             if (!string.IsNullOrEmpty(code))
             {
                 var property = await _context.Properties
                     .Include(p => p.Landlord)
-                    .FirstOrDefaultAsync(p => p.PropertyCode == code && (p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId)));
+                    .FirstOrDefaultAsync(p => p.PropertyCode == code && (p.Landlord.UserId == userId.Value || p.Tenants.Any(t => t.UserId == userId.Value)));
 
-                if (property == null) return NotFound();
+                if (property == null)
+                    return NotFound(new ErrorResponse("NotFound", _localizer["Property_NotFound"]));
 
                 var healthScore = await CalculateHealthScoreAsync(property.Id);
 
@@ -137,7 +114,7 @@ namespace Nexora.WebApi.Controllers
             var properties = await _context.Properties
                 .Include(p => p.Landlord)
                 .Include(p => p.Tenants)
-                .Where(p => p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId))
+                .Where(p => p.Landlord.UserId == userId.Value || p.Tenants.Any(t => t.UserId == userId.Value))
                 .ToListAsync();
 
             var dtos = new List<PropertyDto>();
@@ -171,17 +148,23 @@ namespace Nexora.WebApi.Controllers
             return Ok(dtos);
         }
 
-        [HttpGet("{id}")]
-        public async Task<IActionResult> GetById(long id)
+        [HttpGet("{propertyId}")]
+        [SwaggerOperation(Summary = "Get property by ID", Description = "Returns detailed information for a specific property including health score.")]
+        [ProducesResponseType(typeof(PropertyDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetById(long propertyId)
         {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+            var userId = User.GetUserId();
+            if (userId == null)
+                return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
             var property = await _context.Properties
                 .Include(p => p.Landlord)
-                .FirstOrDefaultAsync(p => p.Id == id && (p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId)));
+                .FirstOrDefaultAsync(p => p.Id == propertyId && (p.Landlord.UserId == userId.Value || p.Tenants.Any(t => t.UserId == userId.Value)));
 
-            if (property == null) return NotFound();
+            if (property == null)
+                return NotFound(new ErrorResponse("NotFound", _localizer["Property_NotFound"]));
 
             var healthScore = await CalculateHealthScoreAsync(property.Id);
 
@@ -209,63 +192,46 @@ namespace Nexora.WebApi.Controllers
             ));
         }
 
-        // --- Mantiene el endpoint /summary ---
-        [HttpGet("summary")]
-        public async Task<IActionResult> GetSummary()
+        [HttpGet("~/api/v1/property-statistics")]
+        [SwaggerOperation(Summary = "Get property statistics", Description = "Returns aggregated property statistics for the current user.")]
+        [ProducesResponseType(typeof(PropertySummaryDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+        public async Task<IActionResult> GetStatistics()
         {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+            var userId = User.GetUserId();
+            if (userId == null)
+                return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
             var total = await _context.Properties
-                .CountAsync(p => p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId));
+                .CountAsync(p => p.Landlord.UserId == userId.Value || p.Tenants.Any(t => t.UserId == userId.Value));
 
             var protectedCount = await _context.Properties.CountAsync(p =>
-                (p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId)) &&
+                (p.Landlord.UserId == userId.Value || p.Tenants.Any(t => t.UserId == userId.Value)) &&
                 p.Status == PropertyStatus.ACTIVE &&
                 p.IsSecurityModeArmed);
 
-            return Ok(new { Total = total, ProtectedCount = protectedCount });
+            return Ok(new PropertySummaryDto(total, protectedCount));
         }
 
-        // --- Mantiene el endpoint /stats ---
-        [HttpGet("stats")]
-        public async Task<IActionResult> GetTotalProperties()
+        [HttpPatch("{propertyId}")]
+        [SwaggerOperation(Summary = "Partially update a property", Description = "Updates specific fields of a property (e.g., status, name, security mode).")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> PartialUpdate(long propertyId, [FromBody] UpdatePropertyRequest request)
         {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
-
-            var total = await _context.Properties
-                .CountAsync(p => p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId));
-            return Ok(new { Total = total });
-        }
-
-        // --- Mantiene el endpoint /dashboards ---
-        [HttpGet("dashboards")]
-        public async Task<IActionResult> GetEmptyAndProtectedCount()
-        {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
-
-            var count = await _context.Properties.CountAsync(p => 
-                (p.Landlord.UserId == userId || p.Tenants.Any(t => t.UserId == userId)) && 
-                p.Status == PropertyStatus.ACTIVE &&
-                p.IsSecurityModeArmed);
-            
-            return Ok(new { Count = count });
-        }
-
-        [HttpPut("{id}")]
-        public async Task<IActionResult> Update(long id, [FromBody] UpdatePropertyRequest request)
-        {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+            var userId = User.GetUserId();
+            if (userId == null)
+                return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
             var owned = await _context.Properties
-                .AnyAsync(p => p.Id == id && p.Landlord.UserId == userId);
-            if (!owned) return NotFound();
+                .AnyAsync(p => p.Id == propertyId && p.Landlord.UserId == userId.Value);
+            if (!owned)
+                return NotFound(new ErrorResponse("NotFound", _localizer["Property_NotOwnedOrNotFound"]));
 
             var command = new UpdatePropertyCommand(
-                id,
+                propertyId,
                 request.Name,
                 request.Description,
                 request.Type,
@@ -276,29 +242,57 @@ namespace Nexora.WebApi.Controllers
                 request.IsSecurityModeArmed
             );
             var result = await _mediator.Send(command);
-            if (!result) return NotFound();
+            if (!result)
+                return NotFound(new ErrorResponse("NotFound", _localizer["Property_NotFound"]));
             return NoContent();
+        }
+
+        [HttpDelete("{propertyId}")]
+        [SwaggerOperation(Summary = "Delete a property", Description = "Removes a property and its associated data.")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Delete(long propertyId)
+        {
+            var userId = User.GetUserId();
+            if (userId == null)
+                return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
+
+            var property = await _context.Properties
+                .FirstOrDefaultAsync(p => p.Id == propertyId && p.Landlord.UserId == userId.Value);
+
+            if (property == null)
+                return NotFound(new ErrorResponse("NotFound", _localizer["Property_NotOwnedOrNotFound"]));
+
+            _context.Properties.Remove(property);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        private async Task<int?> CalculateHealthScoreAsync(long propertyId)
+        {
+            var devices = await _context.Devices
+                .Where(d => d.PropertyId == propertyId)
+                .ToListAsync();
+
+            if (!devices.Any()) return null;
+
+            var offlineCount = devices.Count(d => d.ConnectionStatus == ConnectionStatus.Offline);
+
+            var deviceIds = devices.Select(d => d.Id).ToList();
+            var criticalAlertCount = await _context.Alerts
+                .Where(a => deviceIds.Contains(a.DeviceId) &&
+                            a.Severity == AlertSeverity.Critical &&
+                            a.Timestamp >= DateTime.UtcNow.AddDays(-1))
+                .Select(a => new { a.DeviceId, a.Type })
+                .Distinct()
+                .CountAsync();
+
+            int score = 100 - (offlineCount * 30) - (criticalAlertCount * 40);
+            return Math.Max(0, Math.Min(100, score));
         }
     }
 
-    public record CreatePropertyRequest(
-        string Name, 
-        string? Description,
-        PropertyType Type,
-        string Country,
-        string City,
-        string Address,
-        bool IsSecurityModeArmed
-    );
-
-    public record UpdatePropertyRequest(
-        string Name,
-        string? Description,
-        PropertyType Type,
-        string Country,
-        string City,
-        string Address,
-        PropertyStatus Status,
-        bool IsSecurityModeArmed
-    );
+    public record CreatePropertyRequest(string Name, string? Description, PropertyType Type, string Country, string City, string Address, bool IsSecurityModeArmed);
+    public record UpdatePropertyRequest(string Name, string? Description, PropertyType Type, string Country, string City, string Address, PropertyStatus Status, bool IsSecurityModeArmed);
 }

@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
-using Nexora.Application.Dto;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Localization;
+using Nexora.Shared.Domain.Api;
+using Nexora.Shared.Domain.Resources;
 using System.Security.Claims;
 
 namespace Nexora.WebApi.Middleware
@@ -21,14 +24,14 @@ namespace Nexora.WebApi.Middleware
 
             if (string.IsNullOrEmpty(userableType) || userableType != _requiredType)
             {
-                context.Result = new ObjectResult(
-                    new ErrorResponseDto(
-                        "Forbidden",
-                        _requiredType == "Landlord"
-                            ? "Acceso denegado. Esta plataforma es exclusiva para arrendadores."
-                            : "Acceso denegado. Esta plataforma es exclusiva para arrendatarios."
-                    )
-                )
+                var localizer = context.HttpContext.RequestServices
+                    .GetRequiredService<IStringLocalizer<SharedMessages>>();
+
+                var message = _requiredType == "Landlord"
+                    ? localizer["Forbidden_LandlordOnly"]
+                    : localizer["Forbidden_TenantOnly"];
+
+                context.Result = new ObjectResult(new ErrorResponse("Forbidden", message))
                 {
                     StatusCode = 403
                 };

@@ -1,15 +1,20 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Localization;
 using Nexora.Application.Dto;
 using Nexora.Domain.Entities;
 using Nexora.Domain.Enums;
 using Nexora.Domain.Repositories;
 using Nexora.Infrastructure.Persistence;
-using System.Security.Claims;
-using Microsoft.Extensions.Configuration;
+using Nexora.Shared.Domain.Api;
+using Nexora.Shared.Domain.Resources;
 using Stripe;
 using Stripe.Checkout;
+using Swashbuckle.AspNetCore.Annotations;
+using System.Security.Claims;
 
 using StripeInvoice = Stripe.Invoice;
 using StripeSubscription = Stripe.Subscription;
@@ -19,13 +24,9 @@ using LocalSubscription = Nexora.Domain.Entities.Subscription;
 namespace Nexora.WebApi.Controllers
 {
     [ApiController]
-    [Route("api/v1/subscriptions")]
+    [SwaggerTag("Subscriptions & Billing")]
     public class SubscriptionsController : ControllerBase
     {
-        // Restricts the PaymentSheet to card only, matching the web app's checkout
-        // (which uses Stripe's basic Card Element). Hides Klarna, Cash App Pay,
-        // Amazon Pay, Bank, Link, etc. that Stripe would otherwise offer automatically
-        // based on the dashboard's enabled payment methods.
         private static readonly List<string> AllowedPaymentMethodTypes = new() { "card" };
 
         private readonly NexoraDbContext _context;
@@ -33,33 +34,32 @@ namespace Nexora.WebApi.Controllers
         private readonly ISubscriptionRepository _subscriptionRepository;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IConfiguration _config;
+        private readonly IStringLocalizer<SharedMessages> _localizer;
 
         public SubscriptionsController(
             NexoraDbContext context,
             ILandlordRepository landlordRepository,
             ISubscriptionRepository subscriptionRepository,
             IUnitOfWork unitOfWork,
-            IConfiguration config)
+            IConfiguration config,
+            IStringLocalizer<SharedMessages> localizer)
         {
             _context = context;
             _landlordRepository = landlordRepository;
             _subscriptionRepository = subscriptionRepository;
             _unitOfWork = unitOfWork;
             _config = config;
+            _localizer = localizer;
         }
+
+        #region Subscription Plans & Configuration
 
         /// <summary>
-        /// Public Stripe configuration (publishable key) needed to initialise the
-        /// flutter_stripe SDK client-side. Safe to expose without authentication.
+        /// Returns available subscription plans, optionally filtered by target user type.
         /// </summary>
-        [HttpGet("config")]
-        public IActionResult GetConfig()
-        {
-            var key = _config["Stripe:PublishableKey"] ?? string.Empty;
-            return Ok(new StripeConfigDto(key));
-        }
-
-        [HttpGet("plans")]
+        [HttpGet("api/v1/subscription-plans")]
+        [SwaggerOperation(Summary = "Get available subscription plans", Description = "Retrieves all active subscription plans, optionally filtered by target user type (e.g., landlord or tenant).")]
+        [ProducesResponseType(typeof(List<SubscriptionPlanDto>), StatusCodes.Status200OK)]
         public async Task<IActionResult> GetPlans([FromQuery] string? target = null)
         {
             var query = _context.SubscriptionPlans.Where(p => p.IsActive);
@@ -77,35 +77,68 @@ namespace Nexora.WebApi.Controllers
             return Ok(dtos);
         }
 
-        [Authorize]
-        [HttpGet("current")]
-        public async Task<IActionResult> GetCurrent()
+        /// <summary>
+        /// Returns the Stripe publishable key needed to initialise the flutter_stripe SDK.
+        /// </summary>
+        [HttpGet("api/v1/payment-configuration")]
+        [SwaggerOperation(Summary = "Get payment configuration", Description = "Returns the Stripe publishable key needed to initialise the flutter_stripe SDK on the client side.")]
+        [ProducesResponseType(typeof(StripeConfigDto), StatusCodes.Status200OK)]
+        public IActionResult GetConfiguration()
         {
-            var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
-
-            var subscription = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
-            if (subscription == null)
-                return Ok(new { subscription = (object?)null, message = "No active subscription." });
-
-            var dto = MapToDto(subscription);
-            return Ok(new { subscription = dto });
+            var key = _config["Stripe:PublishableKey"] ?? string.Empty;
+            return Ok(new StripeConfigDto(key));
         }
 
+        #endregion
+
+        #region Subscriptions
+
+        /// <summary>
+        /// Returns all subscriptions for the authenticated user.
+        /// </summary>
         [Authorize]
-        [HttpPost("")]
+        [HttpGet("api/v1/subscriptions")]
+        [SwaggerOperation(Summary = "List subscriptions", Description = "Returns all subscriptions for the authenticated landlord.")]
+        [ProducesResponseType(typeof(List<SubscriptionDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<IActionResult> GetAll()
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null)
+                return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
+
+            var subscriptions = await _context.Subscriptions
+                .Include(s => s.Plan)
+                .Where(s => s.LandlordId == landlord.Id)
+                .OrderByDescending(s => s.StartedAt)
+                .ToListAsync();
+
+            var dtos = subscriptions.Select(MapToDto).ToList();
+            return Ok(dtos);
+        }
+
+        /// <summary>
+        /// Activates a new subscription for the authenticated landlord.
+        /// </summary>
+        [Authorize]
+        [HttpPost("api/v1/subscriptions")]
+        [SwaggerOperation(Summary = "Activate a subscription", Description = "Activates a new subscription for the authenticated landlord. Supports local-dev mock flow and live Stripe flow.")]
+        [ProducesResponseType(typeof(ActivateSubscriptionResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<IActionResult> Activate([FromBody] ActivateSubscriptionRequest request)
         {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return Unauthorized();
+            var userId = User.GetUserId();
+            if (userId == null)
+                return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
-            var landlord = await _landlordRepository.GetByUserIdAsync(userId);
+            var landlord = await _landlordRepository.GetByUserIdAsync(userId.Value);
             if (landlord == null)
-                return BadRequest("Landlord profile not found.");
+                return BadRequest(new ErrorResponse("BadRequest", _localizer["Profile_LandlordNotFound"]));
 
             var plan = await _context.SubscriptionPlans.FindAsync(request.SubscriptionPlanId);
             if (plan == null)
-                return BadRequest("Subscription plan not found.");
+                return BadRequest(new ErrorResponse("BadRequest", _localizer["Subscription_PlanNotFound"]));
 
             if (string.IsNullOrEmpty(Stripe.StripeConfiguration.ApiKey) || Stripe.StripeConfiguration.ApiKey.Contains("YOUR_STRIPE"))
             {
@@ -130,7 +163,7 @@ namespace Nexora.WebApi.Controllers
                     {
                         if (existingLocal.SubscriptionPlanId == plan.Id)
                         {
-                            return BadRequest("Already subscribed to this plan.");
+                            return BadRequest(new ErrorResponse("BadRequest", _localizer["Subscription_AlreadySubscribed"]));
                         }
 
                         existingLocal.ChangePlan(plan.Id, DateTime.UtcNow.AddMonths(1));
@@ -158,17 +191,15 @@ namespace Nexora.WebApi.Controllers
                 var localSubFromDb = await _subscriptionRepository.GetByIdAsync(localSub.Id);
                 var localDueDate = localNow.AddDays(7);
                 var localInvoice = new Nexora.Domain.Entities.Invoice(localSub.Id, plan.MonthlyPrice, localDueDate);
-                
-                // For local dev, mark the mock payment as Paid immediately
+
                 localInvoice.MarkAsPaid();
                 _context.Invoices.Add(localInvoice);
-                await _unitOfWork.SaveChangesAsync(); // Generates localInvoice.Id
+                await _unitOfWork.SaveChangesAsync();
 
                 var localPayment = new Payment(localInvoice.Id, localInvoice.Amount, "local", "local_tx_" + Guid.NewGuid());
                 localPayment.Succeed();
                 _context.Payments.Add(localPayment);
 
-                // Save or update card details locally
                 if (!string.IsNullOrEmpty(request.FullNumber))
                 {
                     var existingCard = await _context.SavedCards
@@ -207,12 +238,12 @@ namespace Nexora.WebApi.Controllers
                 var localSubDto = MapToDto(localSubFromDb!);
                 return Ok(new ActivateSubscriptionResponse(localSubDto, plan.MonthlyPrice, localDueDate, localInvoice.Id, null));
             }
+
             var existing = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
             if (existing != null)
             {
                 if (existing.Status == SubscriptionStatus.Cancelled || existing.Status == SubscriptionStatus.Expired)
                 {
-                    // Clean up and remove old inactive subscription from database
                     var oldInvs = await _context.Invoices.Where(i => i.SubscriptionId == existing.Id).ToListAsync();
                     var oldInvIds = oldInvs.Select(i => i.Id).ToList();
                     var oldPmts = await _context.Payments.Where(p => oldInvIds.Contains(p.InvoiceId)).ToListAsync();
@@ -227,13 +258,11 @@ namespace Nexora.WebApi.Controllers
                 }
                 else
                 {
-                    // Upgrade/Downgrade Plan Change Flow
                     if (existing.SubscriptionPlanId == plan.Id)
                     {
-                        return BadRequest("Already subscribed to this plan.");
+                        return BadRequest(new ErrorResponse("BadRequest", _localizer["Subscription_AlreadySubscribed"]));
                     }
 
-                    // 1. Stripe Product & Price dynamic check/creation
                     var stripeProductService = new ProductService();
                     Product stripeProduct;
                     try
@@ -268,7 +297,6 @@ namespace Nexora.WebApi.Controllers
                         });
                     }
 
-                    // 2. Update Stripe Subscription
                     var stripeSubSvc = new Stripe.SubscriptionService();
                     var stripeSub = await stripeSubSvc.GetAsync(existing.StripeSubscriptionId);
                     var subscriptionItem = stripeSub.Items.Data.First();
@@ -294,7 +322,6 @@ namespace Nexora.WebApi.Controllers
 
                     stripeSub = await stripeSubSvc.UpdateAsync(existing.StripeSubscriptionId, stripeSubscriptionUpdateOptions);
 
-                    // 3. Local database update
                     existing.ChangePlan(plan.Id, DateTime.UtcNow.AddMonths(1));
                     await _subscriptionRepository.UpdateAsync(existing);
 
@@ -307,20 +334,16 @@ namespace Nexora.WebApi.Controllers
 
                     await _unitOfWork.SaveChangesAsync();
 
-                    // Downgrades (or fully-credited prorations) can leave the invoice's
-                    // PaymentIntent already settled with nothing left to collect; only
-                    // surface a clientSecret when the client actually needs to confirm it.
                     var prorationClientSecret = await GetClientSecretIfPaymentRequiredAsync(stripeSub.LatestInvoice);
 
                     return Ok(new
                     {
-                        subscription = MapToDto(existing),
-                        clientSecret = prorationClientSecret
+                        Subscription = MapToDto(existing),
+                        ClientSecret = prorationClientSecret
                     });
                 }
             }
 
-            // 1. Stripe Customer Creation/Verification
             if (string.IsNullOrEmpty(landlord.StripeCustomerId))
             {
                 var customerService = new CustomerService();
@@ -339,7 +362,6 @@ namespace Nexora.WebApi.Controllers
                 await _unitOfWork.SaveChangesAsync();
             }
 
-            // 2. Stripe Product & Price dynamic check/creation
             var productService = new ProductService();
             Product product;
             try
@@ -377,7 +399,6 @@ namespace Nexora.WebApi.Controllers
                 });
             }
 
-            // Create and attach payment method in Stripe if card details are provided
             string? pmId = null;
             if (!string.IsNullOrEmpty(request.FullNumber))
             {
@@ -405,8 +426,8 @@ namespace Nexora.WebApi.Controllers
                         Customer = landlord.StripeCustomerId
                     });
 
-                    var customerService = new CustomerService();
-                    await customerService.UpdateAsync(landlord.StripeCustomerId, new CustomerUpdateOptions
+                    var customerSvc = new CustomerService();
+                    await customerSvc.UpdateAsync(landlord.StripeCustomerId, new CustomerUpdateOptions
                     {
                         InvoiceSettings = new CustomerInvoiceSettingsOptions
                         {
@@ -432,8 +453,8 @@ namespace Nexora.WebApi.Controllers
                         Customer = landlord.StripeCustomerId
                     });
 
-                    var customerService = new CustomerService();
-                    await customerService.UpdateAsync(landlord.StripeCustomerId, new CustomerUpdateOptions
+                    var customerSvc = new CustomerService();
+                    await customerSvc.UpdateAsync(landlord.StripeCustomerId, new CustomerUpdateOptions
                     {
                         InvoiceSettings = new CustomerInvoiceSettingsOptions
                         {
@@ -447,7 +468,6 @@ namespace Nexora.WebApi.Controllers
                 }
             }
 
-            // 3. Stripe Subscription creation (incomplete, waiting for card confirmation)
             var stripeSubscriptionService = new Stripe.SubscriptionService();
             var subOptions = new Stripe.SubscriptionCreateOptions
             {
@@ -476,7 +496,6 @@ namespace Nexora.WebApi.Controllers
             StripeInvoice stripeInvoice = stripeSubscription.LatestInvoice;
             var clientSecret = await GetClientSecretIfPaymentRequiredAsync(stripeInvoice);
 
-            // 4. Local Database Creation
             var now = DateTime.UtcNow;
             var periodEnd = now.AddMonths(1);
 
@@ -490,17 +509,15 @@ namespace Nexora.WebApi.Controllers
             var dueDate = now.AddDays(7);
             var invoice = new LocalInvoice(subscription.Id, plan.MonthlyPrice, dueDate);
 
-            // Mark it as Paid locally immediately for a seamless checkout experience
             invoice.MarkAsPaid();
             _context.Invoices.Add(invoice);
-            await _unitOfWork.SaveChangesAsync(); // Generates invoice.Id
+            await _unitOfWork.SaveChangesAsync();
 
             var transactionId = stripeInvoice?.Id ?? "stripe_tx";
             var payment = new Payment(invoice.Id, invoice.Amount, "stripe", transactionId);
             payment.Succeed();
             _context.Payments.Add(payment);
 
-            // Save or update card details locally
             if (!string.IsNullOrEmpty(request.FullNumber))
             {
                 var existingCard = await _context.SavedCards
@@ -544,23 +561,168 @@ namespace Nexora.WebApi.Controllers
         }
 
         /// <summary>
-        /// Creates a Stripe Checkout Session (hosted payment page) for the selected plan.
-        /// The mobile app opens the returned URL in the browser; after payment it calls
-        /// POST /sync to reflect the result locally.
+        /// Returns the authenticated landlord's current active subscription.
         /// </summary>
         [Authorize]
-        [HttpPost("checkout-session")]
+        [HttpGet("api/v1/subscriptions/current")]
+        [SwaggerOperation(Summary = "Get current subscription", Description = "Returns the authenticated landlord's current active subscription.")]
+        [ProducesResponseType(typeof(CurrentSubscriptionResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<IActionResult> GetCurrent()
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null)
+                return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
+
+            var subscription = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
+            if (subscription == null)
+                return Ok(new CurrentSubscriptionResponseDto(null, _localizer["Subscription_NotFound"]));
+
+            var dto = MapToDto(subscription);
+            return Ok(new CurrentSubscriptionResponseDto(dto, null));
+        }
+
+        /// <summary>
+        /// Returns a specific subscription by ID.
+        /// </summary>
+        [Authorize]
+        [HttpGet("api/v1/subscriptions/{subscriptionId:long}")]
+        [SwaggerOperation(Summary = "Get subscription by ID", Description = "Returns details for a specific subscription.")]
+        [ProducesResponseType(typeof(SubscriptionDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetById(long subscriptionId)
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null)
+                return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
+
+            var subscription = await _subscriptionRepository.GetByIdAsync(subscriptionId);
+            if (subscription == null || subscription.LandlordId != landlord.Id)
+                return NotFound(new ErrorResponse("NotFound", _localizer["Subscription_NotFound"]));
+
+            return Ok(MapToDto(subscription));
+        }
+
+        /// <summary>
+        /// Updates a subscription's state (cancel or resume). 
+        /// Send { "status": "cancelled" } to cancel or { "status": "active" } to resume.
+        /// </summary>
+        [Authorize]
+        [HttpPatch("api/v1/subscriptions/{subscriptionId:long}")]
+        [SwaggerOperation(Summary = "Update subscription state", Description = "Transitions subscription state: cancel or resume. Body: { \"status\": \"cancelled\" | \"active\" }.")]
+        [ProducesResponseType(typeof(SubscriptionDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status502BadGateway)]
+        public async Task<IActionResult> UpdateSubscription(long subscriptionId, [FromBody] UpdateSubscriptionStateRequest request)
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null)
+                return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
+
+            var subscription = await _subscriptionRepository.GetByIdAsync(subscriptionId);
+            if (subscription == null || subscription.LandlordId != landlord.Id)
+                return NotFound(new ErrorResponse("NotFound", _localizer["Subscription_NotFound"]));
+
+            if (string.IsNullOrEmpty(request.Status))
+                return BadRequest(new ErrorResponse("BadRequest", _localizer["Subscription_InvalidStatus"]));
+
+            if (request.Status.Equals("cancelled", StringComparison.OrdinalIgnoreCase))
+            {
+                if (subscription.Status != SubscriptionStatus.Active && subscription.Status != SubscriptionStatus.PastDue)
+                    return BadRequest(new ErrorResponse("BadRequest", string.Format(_localizer["Subscription_CannotCancel"], subscription.Status)));
+
+                if (!string.IsNullOrEmpty(subscription.StripeSubscriptionId))
+                {
+                    try
+                    {
+                        var stripeSubSvc = new Stripe.SubscriptionService();
+                        await stripeSubSvc.UpdateAsync(subscription.StripeSubscriptionId, new Stripe.SubscriptionUpdateOptions
+                        {
+                            CancelAtPeriodEnd = true
+                        });
+                    }
+                    catch (StripeException ex)
+                    {
+                        return StatusCode(502, new ErrorResponse("BadGateway", string.Format(_localizer["Stripe_Error"], ex.Message)));
+                    }
+                }
+
+                subscription.Cancel();
+
+                var evt = new SubscriptionEvent(subscription.Id, "Subscription Cancelled",
+                    $"Cancelled at period end: {subscription.CurrentPeriodEnd:yyyy-MM-dd}.");
+                _context.SubscriptionEvents.Add(evt);
+
+                await _subscriptionRepository.UpdateAsync(subscription);
+                await _unitOfWork.SaveChangesAsync();
+
+                var updated = await _subscriptionRepository.GetByIdAsync(subscription.Id);
+                return Ok(MapToDto(updated!));
+            }
+            else if (request.Status.Equals("active", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!subscription.CancelAtPeriodEnd)
+                    return BadRequest(new ErrorResponse("BadRequest", _localizer["Subscription_NotScheduledForCancellation"]));
+
+                if (!string.IsNullOrEmpty(subscription.StripeSubscriptionId))
+                {
+                    try
+                    {
+                        var stripeSubSvc = new Stripe.SubscriptionService();
+                        await stripeSubSvc.UpdateAsync(subscription.StripeSubscriptionId, new Stripe.SubscriptionUpdateOptions
+                        {
+                            CancelAtPeriodEnd = false
+                        });
+                    }
+                    catch (StripeException ex)
+                    {
+                        return StatusCode(502, new ErrorResponse("BadGateway", string.Format(_localizer["Stripe_Error"], ex.Message)));
+                    }
+                }
+
+                subscription.UndoCancel();
+
+                var evt = new SubscriptionEvent(subscription.Id, "Subscription Resumed",
+                    "Cancellation undone; subscription will continue renewing.");
+                _context.SubscriptionEvents.Add(evt);
+
+                await _subscriptionRepository.UpdateAsync(subscription);
+                await _unitOfWork.SaveChangesAsync();
+
+                var updated = await _subscriptionRepository.GetByIdAsync(subscription.Id);
+                return Ok(MapToDto(updated!));
+            }
+
+            return BadRequest(new ErrorResponse("BadRequest", _localizer["Subscription_InvalidStatus"]));
+        }
+
+        #endregion
+
+        #region Checkout Sessions & Syncs
+
+        /// <summary>
+        /// Creates a Stripe Checkout Session for the selected subscription plan.
+        /// </summary>
+        [Authorize]
+        [HttpPost("api/v1/checkout-sessions")]
+        [SwaggerOperation(Summary = "Create Stripe Checkout session", Description = "Creates a Stripe Checkout Session for the selected subscription plan.")]
+        [ProducesResponseType(typeof(CheckoutSessionResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status502BadGateway)]
         public async Task<IActionResult> CreateCheckoutSession([FromBody] ActivateSubscriptionRequest request)
         {
             var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
+            if (landlord == null) return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
             var plan = await _context.SubscriptionPlans.FindAsync(request.SubscriptionPlanId);
-            if (plan == null) return BadRequest("Subscription plan not found.");
+            if (plan == null) return BadRequest(new ErrorResponse("BadRequest", _localizer["Subscription_PlanNotFound"]));
 
             try
             {
-                // Ensure Stripe customer for this landlord.
                 if (string.IsNullOrEmpty(landlord.StripeCustomerId))
                 {
                     var customerService = new CustomerService();
@@ -607,22 +769,25 @@ namespace Nexora.WebApi.Controllers
             }
             catch (StripeException ex)
             {
-                return StatusCode(502, new { message = $"Stripe error: {ex.Message}" });
+                return StatusCode(502, new ErrorResponse("BadGateway", string.Format(_localizer["Stripe_Error"], ex.Message)));
             }
         }
 
         /// <summary>
-        /// Reconciles the local subscription with the landlord's active Stripe subscription
-        /// (called by the app after returning from Stripe Checkout).
+        /// Reconciles the local subscription with the landlord's active Stripe subscription.
         /// </summary>
         [Authorize]
-        [HttpPost("sync")]
+        [HttpPost("api/v1/subscription-syncs")]
+        [SwaggerOperation(Summary = "Sync subscription from Stripe", Description = "Reconciles the local subscription with the landlord's active Stripe subscription.")]
+        [ProducesResponseType(typeof(SyncSubscriptionResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status502BadGateway)]
         public async Task<IActionResult> Sync()
         {
             var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
+            if (landlord == null) return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
             if (string.IsNullOrEmpty(landlord.StripeCustomerId))
-                return Ok(new { subscription = (object?)null });
+                return Ok(new SyncSubscriptionResponseDto(null));
 
             try
             {
@@ -637,7 +802,7 @@ namespace Nexora.WebApi.Controllers
                 if (stripeSub == null)
                 {
                     var currentLocal = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
-                    return Ok(new { subscription = currentLocal == null ? null : MapToDto(currentLocal) });
+                    return Ok(new SyncSubscriptionResponseDto(currentLocal == null ? null : MapToDto(currentLocal)));
                 }
 
                 long planId = 0;
@@ -676,111 +841,30 @@ namespace Nexora.WebApi.Controllers
                 }
 
                 var full = existing == null ? null : await _subscriptionRepository.GetByIdAsync(existing.Id);
-                return Ok(new { subscription = full == null ? null : MapToDto(full) });
+                return Ok(new SyncSubscriptionResponseDto(full == null ? null : MapToDto(full)));
             }
             catch (StripeException ex)
             {
-                return StatusCode(502, new { message = $"Stripe error: {ex.Message}" });
+                return StatusCode(502, new ErrorResponse("BadGateway", string.Format(_localizer["Stripe_Error"], ex.Message)));
             }
         }
 
-        private static async Task<Product> EnsureStripeProductAsync(SubscriptionPlan plan)
-        {
-            var productService = new ProductService();
-            try
-            {
-                return await productService.GetAsync($"plan_{plan.Id}");
-            }
-            catch (StripeException)
-            {
-                return await productService.CreateAsync(new ProductCreateOptions
-                {
-                    Id = $"plan_{plan.Id}",
-                    Name = plan.Name,
-                    Description = $"Nexora Subscription Plan: {plan.Name}"
-                });
-            }
-        }
+        #endregion
 
-        private static async Task<Price> EnsureStripePriceAsync(Product product, SubscriptionPlan plan)
-        {
-            var priceService = new PriceService();
-            var prices = await priceService.ListAsync(new PriceListOptions { Product = product.Id, Active = true });
-            var price = prices.FirstOrDefault(p => p.UnitAmount == (long)(plan.MonthlyPrice * 100));
-            return price ?? await priceService.CreateAsync(new PriceCreateOptions
-            {
-                Product = product.Id,
-                UnitAmount = (long)(plan.MonthlyPrice * 100),
-                Currency = "usd",
-                Recurring = new PriceRecurringOptions { Interval = "month" }
-            });
-        }
+        #region Payment Methods
 
         /// <summary>
-        /// Returns the invoice's PaymentIntent client secret only when the client still
-        /// needs to confirm it (e.g. requires a payment method or 3D Secure). Downgrades
-        /// or fully-credited prorations can leave the PaymentIntent already 'succeeded'
-        /// (or absent, for a zero-amount invoice) — in those cases no native PaymentSheet
-        /// confirmation is needed, so we return null.
+        /// Returns all saved payment methods for the authenticated landlord.
         /// </summary>
-        private static async Task<string?> GetClientSecretIfPaymentRequiredAsync(StripeInvoice? invoice)
-        {
-            var clientSecret = invoice?.ConfirmationSecret?.ClientSecret;
-            if (string.IsNullOrEmpty(clientSecret)) return null;
-
-            // The PaymentIntent id lives under the newer Invoice Payments API shape:
-            // invoice.payments.data[].payment.payment_intent_id (Stripe caps expand at
-            // 4 levels, so we fetch the PaymentIntent itself in a second call).
-            var paymentIntentId = invoice?.Payments?.Data?.FirstOrDefault()?.Payment?.PaymentIntentId;
-            if (string.IsNullOrEmpty(paymentIntentId))
-            {
-                // Status unknown (e.g. no payment record yet) — fail open and let the
-                // client attempt confirmation, matching the previous behaviour.
-                return clientSecret;
-            }
-
-            var paymentIntent = await new PaymentIntentService().GetAsync(paymentIntentId);
-            var needsConfirmation = paymentIntent.Status is "requires_payment_method"
-                or "requires_confirmation"
-                or "requires_action";
-            return needsConfirmation ? clientSecret : null;
-        }
-
         [Authorize]
-        [HttpGet("payment-method")]
-        public async Task<IActionResult> GetPaymentMethod()
-        {
-            var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
-
-            var savedCard = await _context.SavedCards
-                .FirstOrDefaultAsync(c => c.LandlordId == landlord.Id);
-
-            if (savedCard == null)
-                return Ok(new { paymentMethod = (object?)null });
-
-            var dto = new PaymentMethodDto(
-                savedCard.Id,
-                savedCard.Brand,
-                savedCard.LastFour,
-                savedCard.FullNumber,
-                savedCard.ExpiryMonth,
-                savedCard.ExpiryYear,
-                savedCard.HolderName,
-                savedCard.Cvv,
-                landlord.FirstName,
-                landlord.LastName
-            );
-
-            return Ok(new { paymentMethod = dto });
-        }
-
-        [Authorize]
-        [HttpGet("payment-methods")]
+        [HttpGet("api/v1/payment-methods")]
+        [SwaggerOperation(Summary = "Get all saved payment methods", Description = "Returns all saved payment methods (cards) for the authenticated landlord.")]
+        [ProducesResponseType(typeof(PaymentMethodsResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<IActionResult> GetPaymentMethods()
         {
             var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
+            if (landlord == null) return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
             var firstName = landlord.FirstName;
             var lastName = landlord.LastName;
@@ -801,39 +885,22 @@ namespace Nexora.WebApi.Controllers
                 ))
                 .ToListAsync();
 
-            return Ok(new { paymentMethods = savedCards });
+            return Ok(new PaymentMethodsResponseDto(savedCards));
         }
 
+        /// <summary>
+        /// Creates a new saved payment method.
+        /// </summary>
         [Authorize]
-        [HttpGet("payment-methods/{id:long}")]
-        public async Task<IActionResult> GetPaymentMethod(long id)
-        {
-            var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
-
-            var card = await _context.SavedCards
-                .FirstOrDefaultAsync(c => c.Id == id && c.LandlordId == landlord.Id);
-
-            if (card == null) return NotFound();
-
-            return Ok(new PaymentMethodDetailDto(
-                card.Id,
-                card.Brand,
-                card.LastFour,
-                card.FullNumber,
-                card.ExpiryMonth,
-                card.ExpiryYear,
-                card.HolderName,
-                card.Cvv
-            ));
-        }
-
-        [Authorize]
-        [HttpPost("payment-methods")]
+        [HttpPost("api/v1/payment-methods")]
+        [SwaggerOperation(Summary = "Create payment method", Description = "Creates a new saved payment method (card) for the authenticated landlord.")]
+        [ProducesResponseType(typeof(PaymentMethodDetailDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<IActionResult> CreatePaymentMethod([FromBody] UpdatePaymentMethodRequest request)
         {
             var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
+            if (landlord == null) return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
             if (!string.IsNullOrEmpty(request.PaymentMethodId))
             {
@@ -868,278 +935,153 @@ namespace Nexora.WebApi.Controllers
 
                     if (existingCard != null)
                     {
-                        existingCard.Update(
-                            brand,
-                            $"************{lastFour}",
-                            expMonth,
-                            expYear,
-                            holderName,
-                            "***"
-                        );
+                        existingCard.Update(brand, $"************{lastFour}", expMonth, expYear, holderName, "***");
                     }
                     else
                     {
-                        existingCard = new SavedCard(
-                            landlord.Id,
-                            brand,
-                            $"************{lastFour}",
-                            expMonth,
-                            expYear,
-                            holderName,
-                            "***"
-                        );
+                        existingCard = new SavedCard(landlord.Id, brand, $"************{lastFour}", expMonth, expYear, holderName, "***");
                         _context.SavedCards.Add(existingCard);
                     }
 
                     await _context.SaveChangesAsync();
 
                     return Ok(new PaymentMethodDetailDto(
-                        existingCard.Id,
-                        existingCard.Brand,
-                        existingCard.LastFour,
-                        existingCard.FullNumber,
-                        existingCard.ExpiryMonth,
-                        existingCard.ExpiryYear,
-                        existingCard.HolderName,
-                        existingCard.Cvv
+                        existingCard.Id, existingCard.Brand, existingCard.LastFour, existingCard.FullNumber,
+                        existingCard.ExpiryMonth, existingCard.ExpiryYear, existingCard.HolderName, existingCard.Cvv
                     ));
                 }
                 catch (Exception ex)
                 {
-                    return BadRequest($"Stripe error: {ex.Message}");
+                    return BadRequest(new ErrorResponse("BadRequest", string.Format(_localizer["Stripe_Error"], ex.Message)));
                 }
             }
 
-            // If a card already exists, update it instead of creating duplicates
-            var existingCardLocal = await _context.SavedCards
-                .FirstOrDefaultAsync(c => c.LandlordId == landlord.Id);
-
-            if (existingCardLocal != null)
+            var card = await _context.SavedCards.FirstOrDefaultAsync(c => c.LandlordId == landlord.Id);
+            if (card != null)
             {
-                existingCardLocal.Update(
-                    request.Brand,
-                    request.FullNumber,
-                    request.ExpiryMonth,
-                    request.ExpiryYear,
-                    request.HolderName,
-                    request.Cvv
-                );
+                card.Update(request.Brand, request.FullNumber, request.ExpiryMonth, request.ExpiryYear, request.HolderName, request.Cvv);
                 await _context.SaveChangesAsync();
-                return Ok(new PaymentMethodDetailDto(
-                    existingCardLocal.Id,
-                    existingCardLocal.Brand,
-                    existingCardLocal.LastFour,
-                    existingCardLocal.FullNumber,
-                    existingCardLocal.ExpiryMonth,
-                    existingCardLocal.ExpiryYear,
-                    existingCardLocal.HolderName,
-                    existingCardLocal.Cvv
-                ));
+                return Ok(new PaymentMethodDetailDto(card.Id, card.Brand, card.LastFour, card.FullNumber, card.ExpiryMonth, card.ExpiryYear, card.HolderName, card.Cvv));
             }
 
-            var card = new SavedCard(
-                landlord.Id,
-                request.Brand,
-                request.FullNumber,
-                request.ExpiryMonth,
-                request.ExpiryYear,
-                request.HolderName,
-                request.Cvv
-            );
-
+            card = new SavedCard(landlord.Id, request.Brand, request.FullNumber, request.ExpiryMonth, request.ExpiryYear, request.HolderName, request.Cvv);
             _context.SavedCards.Add(card);
             await _context.SaveChangesAsync();
 
+            return Ok(new PaymentMethodDetailDto(card.Id, card.Brand, card.LastFour, card.FullNumber, card.ExpiryMonth, card.ExpiryYear, card.HolderName, card.Cvv));
+        }
+
+        /// <summary>
+        /// Returns a specific payment method by ID.
+        /// </summary>
+        [Authorize]
+        [HttpGet("api/v1/payment-methods/{paymentMethodId:long}")]
+        [SwaggerOperation(Summary = "Get payment method by ID", Description = "Returns a specific saved payment method by its ID.")]
+        [ProducesResponseType(typeof(PaymentMethodDetailDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetPaymentMethodById(long paymentMethodId)
+        {
+            var landlord = await GetLandlordAsync();
+            if (landlord == null) return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
+
+            var card = await _context.SavedCards
+                .FirstOrDefaultAsync(c => c.Id == paymentMethodId && c.LandlordId == landlord.Id);
+
+            if (card == null) return NotFound(new ErrorResponse("NotFound", _localizer["PaymentMethod_NotFound"]));
+
             return Ok(new PaymentMethodDetailDto(
-                card.Id,
-                card.Brand,
-                card.LastFour,
-                card.FullNumber,
-                card.ExpiryMonth,
-                card.ExpiryYear,
-                card.HolderName,
-                card.Cvv
+                card.Id, card.Brand, card.LastFour, card.FullNumber,
+                card.ExpiryMonth, card.ExpiryYear, card.HolderName, card.Cvv
             ));
         }
 
+        /// <summary>
+        /// Updates a specific payment method by ID.
+        /// </summary>
         [Authorize]
-        [HttpPut("payment-methods/{id:long}")]
-        public async Task<IActionResult> UpdatePaymentMethod(long id, [FromBody] UpdatePaymentMethodRequest request)
+        [HttpPatch("api/v1/payment-methods/{paymentMethodId:long}")]
+        [SwaggerOperation(Summary = "Update payment method", Description = "Partially updates a specific saved payment method by its ID.")]
+        [ProducesResponseType(typeof(PaymentMethodDetailDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> UpdatePaymentMethod(long paymentMethodId, [FromBody] UpdatePaymentMethodRequest request)
         {
             var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
+            if (landlord == null) return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
             var card = await _context.SavedCards
-                .FirstOrDefaultAsync(c => c.Id == id && c.LandlordId == landlord.Id);
+                .FirstOrDefaultAsync(c => c.Id == paymentMethodId && c.LandlordId == landlord.Id);
 
-            if (card == null) return NotFound();
+            if (card == null) return NotFound(new ErrorResponse("NotFound", _localizer["PaymentMethod_NotFound"]));
 
-            card.Update(
-                request.Brand,
-                request.FullNumber,
-                request.ExpiryMonth,
-                request.ExpiryYear,
-                request.HolderName,
-                request.Cvv
-            );
+            card.Update(request.Brand, request.FullNumber, request.ExpiryMonth, request.ExpiryYear, request.HolderName, request.Cvv);
 
             await _context.SaveChangesAsync();
 
             return Ok(new PaymentMethodDetailDto(
-                card.Id,
-                card.Brand,
-                card.LastFour,
-                card.FullNumber,
-                card.ExpiryMonth,
-                card.ExpiryYear,
-                card.HolderName,
-                card.Cvv
+                card.Id, card.Brand, card.LastFour, card.FullNumber,
+                card.ExpiryMonth, card.ExpiryYear, card.HolderName, card.Cvv
             ));
         }
 
+        /// <summary>
+        /// Deletes a specific payment method by ID.
+        /// </summary>
         [Authorize]
-        [HttpPut("payment-method")]
-        public async Task<IActionResult> UpdatePaymentMethodSingular([FromBody] UpdatePaymentMethodRequest request)
+        [HttpDelete("api/v1/payment-methods/{paymentMethodId:long}")]
+        [SwaggerOperation(Summary = "Delete payment method", Description = "Removes a specific saved payment method by its ID.")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> DeletePaymentMethod(long paymentMethodId)
         {
             var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
+            if (landlord == null) return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
-            if (string.IsNullOrEmpty(request.PaymentMethodId))
-            {
-                return BadRequest("PaymentMethodId is required.");
-            }
+            var card = await _context.SavedCards
+                .FirstOrDefaultAsync(c => c.Id == paymentMethodId && c.LandlordId == landlord.Id);
 
-            try
-            {
-                var paymentMethodService = new PaymentMethodService();
-                var pm = await paymentMethodService.GetAsync(request.PaymentMethodId);
+            if (card == null) return NotFound(new ErrorResponse("NotFound", _localizer["PaymentMethod_NotFound"]));
 
-                await paymentMethodService.AttachAsync(pm.Id, new PaymentMethodAttachOptions
-                {
-                    Customer = landlord.StripeCustomerId
-                });
+            _context.SavedCards.Remove(card);
+            await _context.SaveChangesAsync();
 
-                var customerService = new CustomerService();
-                await customerService.UpdateAsync(landlord.StripeCustomerId, new CustomerUpdateOptions
-                {
-                    InvoiceSettings = new CustomerInvoiceSettingsOptions
-                    {
-                        DefaultPaymentMethod = pm.Id
-                    }
-                });
-
-                var brand = pm.Card?.Brand ?? "Visa";
-                var lastFour = pm.Card?.Last4 ?? "4242";
-                var expMonth = pm.Card?.ExpMonth.ToString().PadLeft(2, '0') ?? "12";
-                var expYearStr = pm.Card?.ExpYear.ToString() ?? "29";
-                var expYear = expYearStr.Length > 2 ? expYearStr.Substring(expYearStr.Length - 2) : expYearStr;
-                var holderName = request.HolderName ?? pm.BillingDetails?.Name ?? "Cardholder User";
-
-                var card = await _context.SavedCards.FirstOrDefaultAsync(c => c.LandlordId == landlord.Id);
-                if (card != null)
-                {
-                    card.Update(
-                        brand,
-                        $"************{lastFour}",
-                        expMonth,
-                        expYear,
-                        holderName,
-                        "***"
-                    );
-                }
-                else
-                {
-                    card = new SavedCard(
-                        landlord.Id,
-                        brand,
-                        $"************{lastFour}",
-                        expMonth,
-                        expYear,
-                        holderName,
-                        "***"
-                    );
-                    _context.SavedCards.Add(card);
-                }
-
-                await _context.SaveChangesAsync();
-
-                return Ok(new PaymentMethodDetailDto(
-                    card.Id,
-                    card.Brand,
-                    card.LastFour,
-                    card.FullNumber,
-                    card.ExpiryMonth,
-                    card.ExpiryYear,
-                    card.HolderName,
-                    card.Cvv
-                ));
-            }
-            catch (Exception ex)
-            {
-                return BadRequest($"Stripe error: {ex.Message}");
-            }
+            return NoContent();
         }
 
+        #endregion
+
+        #region Invoices
+
+        /// <summary>
+        /// Returns all invoices for the authenticated landlord's subscriptions.
+        /// </summary>
         [Authorize]
-        [HttpPost("{subscriptionId:long}/cancel")]
-        public async Task<IActionResult> CancelSubscription(long subscriptionId)
+        [HttpGet("api/v1/invoices")]
+        [SwaggerOperation(Summary = "Get invoices", Description = "Returns all invoices for the authenticated landlord's subscriptions.")]
+        [ProducesResponseType(typeof(InvoicesResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<IActionResult> GetInvoices([FromQuery] long? subscriptionId = null)
         {
             var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
+            if (landlord == null) return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
-            var subscription = await _subscriptionRepository.GetByIdAsync(subscriptionId);
-            if (subscription == null || subscription.LandlordId != landlord.Id)
-                return NotFound("Subscription not found.");
+            IQueryable<LocalInvoice> query = _context.Invoices;
 
-            if (subscription.Status != SubscriptionStatus.Active && subscription.Status != SubscriptionStatus.PastDue)
-                return BadRequest($"Cannot cancel subscription in status {subscription.Status}.");
-
-            if (!string.IsNullOrEmpty(subscription.StripeSubscriptionId))
+            if (subscriptionId.HasValue)
             {
-                try
-                {
-                    var stripeSubSvc = new Stripe.SubscriptionService();
-                    await stripeSubSvc.UpdateAsync(subscription.StripeSubscriptionId, new Stripe.SubscriptionUpdateOptions
-                    {
-                        CancelAtPeriodEnd = true
-                    });
-                }
-                catch (StripeException ex)
-                {
-                    return StatusCode(502, new { message = $"Stripe error: {ex.Message}" });
-                }
+                query = query.Where(i => i.SubscriptionId == subscriptionId.Value);
+            }
+            else
+            {
+                var subscription = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
+                if (subscription == null)
+                    return Ok(new InvoicesResponseDto(new List<InvoiceDto>()));
+                query = query.Where(i => i.SubscriptionId == subscription.Id);
             }
 
-            subscription.Cancel();
-
-            var evt = new SubscriptionEvent(subscription.Id, "Subscription Cancelled",
-                $"Cancelled at period end: {subscription.CurrentPeriodEnd:yyyy-MM-dd}.");
-
-            _context.SubscriptionEvents.Add(evt);
-            await _subscriptionRepository.UpdateAsync(subscription);
-            await _unitOfWork.SaveChangesAsync();
-
-            var updated = await _subscriptionRepository.GetByIdAsync(subscription.Id);
-            return Ok(new
-            {
-                message = "Subscription will be cancelled at period end.",
-                subscription = MapToDto(updated!)
-            });
-        }
-
-        [Authorize]
-        [HttpGet("invoices")]
-        public async Task<IActionResult> GetInvoices()
-        {
-            var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
-
-            var subscription = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
-            if (subscription == null)
-                return Ok(new { invoices = Array.Empty<InvoiceDto>() });
-
-            var invoices = await _context.Invoices
-                .Where(i => i.SubscriptionId == subscription.Id)
+            var invoices = await query
                 .OrderByDescending(i => i.CreatedAt)
                 .Select(i => new InvoiceDto(
                     i.Id,
@@ -1150,152 +1092,60 @@ namespace Nexora.WebApi.Controllers
                 ))
                 .ToListAsync();
 
-            return Ok(new { invoices });
-        }
-
-        [Authorize]
-        [HttpPut("status")]
-        public async Task<IActionResult> Cancel()
-        {
-            var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
-
-            var subscription = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
-            if (subscription == null)
-                return BadRequest("No active subscription found.");
-
-            if (subscription.Status != SubscriptionStatus.Active && subscription.Status != SubscriptionStatus.PastDue)
-                return BadRequest($"Cannot cancel subscription in status {subscription.Status}.");
-
-            if (!string.IsNullOrEmpty(subscription.StripeSubscriptionId))
-            {
-                try
-                {
-                    var stripeSubSvc = new Stripe.SubscriptionService();
-                    await stripeSubSvc.UpdateAsync(subscription.StripeSubscriptionId, new Stripe.SubscriptionUpdateOptions
-                    {
-                        CancelAtPeriodEnd = true
-                    });
-                }
-                catch (StripeException ex)
-                {
-                    return StatusCode(502, new { message = $"Stripe error: {ex.Message}" });
-                }
-            }
-
-            subscription.Cancel();
-
-            var evt = new SubscriptionEvent(subscription.Id, "Subscription Cancelled",
-                $"Cancelled at period end: {subscription.CurrentPeriodEnd:yyyy-MM-dd}.");
-
-            _context.SubscriptionEvents.Add(evt);
-            await _subscriptionRepository.UpdateAsync(subscription);
-            await _unitOfWork.SaveChangesAsync();
-
-            var updated = await _subscriptionRepository.GetByIdAsync(subscription.Id);
-            return Ok(new
-            {
-                message = "Subscription will be cancelled at period end.",
-                subscription = MapToDto(updated!)
-            });
-        }
-
-        /// <summary>Undoes a pending cancellation so the subscription keeps renewing.</summary>
-        [Authorize]
-        [HttpPut("status/resume")]
-        public async Task<IActionResult> Resume()
-        {
-            var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
-
-            var subscription = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
-            if (subscription == null)
-                return BadRequest("No active subscription found.");
-
-            if (!subscription.CancelAtPeriodEnd)
-                return BadRequest("Subscription is not scheduled for cancellation.");
-
-            if (!string.IsNullOrEmpty(subscription.StripeSubscriptionId))
-            {
-                try
-                {
-                    var stripeSubSvc = new Stripe.SubscriptionService();
-                    await stripeSubSvc.UpdateAsync(subscription.StripeSubscriptionId, new Stripe.SubscriptionUpdateOptions
-                    {
-                        CancelAtPeriodEnd = false
-                    });
-                }
-                catch (StripeException ex)
-                {
-                    return StatusCode(502, new { message = $"Stripe error: {ex.Message}" });
-                }
-            }
-
-            subscription.UndoCancel();
-
-            var evt = new SubscriptionEvent(subscription.Id, "Subscription Resumed",
-                "Cancellation undone; subscription will continue renewing.");
-
-            _context.SubscriptionEvents.Add(evt);
-            await _subscriptionRepository.UpdateAsync(subscription);
-            await _unitOfWork.SaveChangesAsync();
-
-            var updated = await _subscriptionRepository.GetByIdAsync(subscription.Id);
-            return Ok(new
-            {
-                message = "Subscription will continue renewing.",
-                subscription = MapToDto(updated!)
-            });
+            return Ok(new InvoicesResponseDto(invoices));
         }
 
         /// <summary>
-        /// Cancels the current subscription at period end (local-only flow used by
-        /// the web app). The mobile flow (<see cref="Cancel"/> at PUT status) also
-        /// cancels the Stripe subscription; this route is kept for existing clients.
+        /// Returns a specific invoice by ID.
         /// </summary>
         [Authorize]
-        [HttpPost("current/cancel")]
-        public async Task<IActionResult> CancelCurrent()
+        [HttpGet("api/v1/invoices/{invoiceId:long}")]
+        [SwaggerOperation(Summary = "Get invoice by ID", Description = "Returns details for a specific invoice. Use ?format=pdf to download.")]
+        [ProducesResponseType(typeof(InvoiceDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetInvoiceById(long invoiceId, [FromQuery] string? format = null)
         {
             var landlord = await GetLandlordAsync();
-            if (landlord == null) return Unauthorized();
+            if (landlord == null) return Unauthorized(new ErrorResponse("Unauthorized", _localizer["Auth_Unauthorized"]));
 
-            var subscription = await _subscriptionRepository.GetByLandlordIdAsync(landlord.Id);
-            if (subscription == null)
-                return BadRequest("No active subscription found.");
+            var invoice = await _context.Invoices
+                .FirstOrDefaultAsync(i => i.Id == invoiceId);
 
-            if (subscription.Status != SubscriptionStatus.Active && subscription.Status != SubscriptionStatus.PastDue)
-                return BadRequest($"Cannot cancel subscription in status {subscription.Status}.");
+            if (invoice == null)
+                return NotFound(new ErrorResponse("NotFound", _localizer["Invoice_NotFound"]));
 
-            subscription.Cancel();
-
-            var evt = new SubscriptionEvent(subscription.Id, "Subscription Cancelled",
-                $"Cancelled at period end: {subscription.CurrentPeriodEnd:yyyy-MM-dd}.");
-
-            _context.SubscriptionEvents.Add(evt);
-            await _subscriptionRepository.UpdateAsync(subscription);
-            await _unitOfWork.SaveChangesAsync();
-
-            return Ok(new
+            if (!string.IsNullOrEmpty(format) && format.Equals("pdf", StringComparison.OrdinalIgnoreCase))
             {
-                message = "Subscription will be cancelled at period end.",
-                currentPeriodEnd = subscription.CurrentPeriodEnd
-            });
+                return BadRequest(new ErrorResponse("BadRequest", _localizer["Report_UnsupportedFormat"]));
+            }
+
+            return Ok(new InvoiceDto(
+                invoice.Id,
+                invoice.Amount,
+                invoice.Status.ToString(),
+                invoice.DueDate,
+                invoice.CreatedAt
+            ));
         }
+
+        #endregion
+
+        #region Private Helpers
 
         private async Task<Landlord?> GetLandlordAsync()
         {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return null;
+            var userId = User.GetUserId();
+            if (userId == null) return null;
 
-            var landlord = await _landlordRepository.GetByUserIdAsync(userId);
+            var landlord = await _landlordRepository.GetByUserIdAsync(userId.Value);
             if (landlord == null)
             {
-                var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.UserId == userId);
+                var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.UserId == userId.Value);
                 if (tenant != null)
                 {
                     landlord = new Landlord(
-                        userId,
+                        userId.Value,
                         tenant.FirstName,
                         tenant.LastName,
                         tenant.Country,
@@ -1308,6 +1158,56 @@ namespace Nexora.WebApi.Controllers
                 }
             }
             return landlord;
+        }
+
+        private static async Task<Product> EnsureStripeProductAsync(SubscriptionPlan plan)
+        {
+            var productService = new ProductService();
+            try
+            {
+                return await productService.GetAsync($"plan_{plan.Id}");
+            }
+            catch (StripeException)
+            {
+                return await productService.CreateAsync(new ProductCreateOptions
+                {
+                    Id = $"plan_{plan.Id}",
+                    Name = plan.Name,
+                    Description = $"Nexora Subscription Plan: {plan.Name}"
+                });
+            }
+        }
+
+        private static async Task<Price> EnsureStripePriceAsync(Product product, SubscriptionPlan plan)
+        {
+            var priceService = new PriceService();
+            var prices = await priceService.ListAsync(new PriceListOptions { Product = product.Id, Active = true });
+            var price = prices.FirstOrDefault(p => p.UnitAmount == (long)(plan.MonthlyPrice * 100));
+            return price ?? await priceService.CreateAsync(new PriceCreateOptions
+            {
+                Product = product.Id,
+                UnitAmount = (long)(plan.MonthlyPrice * 100),
+                Currency = "usd",
+                Recurring = new PriceRecurringOptions { Interval = "month" }
+            });
+        }
+
+        private static async Task<string?> GetClientSecretIfPaymentRequiredAsync(StripeInvoice? invoice)
+        {
+            var clientSecret = invoice?.ConfirmationSecret?.ClientSecret;
+            if (string.IsNullOrEmpty(clientSecret)) return null;
+
+            var paymentIntentId = invoice?.Payments?.Data?.FirstOrDefault()?.Payment?.PaymentIntentId;
+            if (string.IsNullOrEmpty(paymentIntentId))
+            {
+                return clientSecret;
+            }
+
+            var paymentIntent = await new PaymentIntentService().GetAsync(paymentIntentId);
+            var needsConfirmation = paymentIntent.Status is "requires_payment_method"
+                or "requires_confirmation"
+                or "requires_action";
+            return needsConfirmation ? clientSecret : null;
         }
 
         private static SubscriptionDto MapToDto(LocalSubscription s)
@@ -1323,8 +1223,6 @@ namespace Nexora.WebApi.Controllers
             );
         }
 
-        // Presentation copy for each plan, served by the API so the mobile app never
-        // hardcodes it. Amount/name/limits come from the database.
         private static readonly Dictionary<string, (string Tagline, string Description, string[] Features, bool Popular)> PlanMarketing =
             new(StringComparer.OrdinalIgnoreCase)
             {
@@ -1398,5 +1296,9 @@ namespace Nexora.WebApi.Controllers
                 p.TargetUser
             );
         }
+
+        #endregion
     }
+
+    public record UpdateSubscriptionStateRequest(string? Status);
 }

@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" msdata:Ordinal="0" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Auth_EmailAlreadyRegistered" xml:space="preserve">
+    <value>The email address is already registered.</value>
+  </data>
+  <data name="Auth_EmailOrTenantNotFound" xml:space="preserve">
+    <value>The email address is already registered or the tenant does not exist.</value>
+  </data>
+  <data name="Auth_InvalidCredentials" xml:space="preserve">
+    <value>Invalid credentials.</value>
+  </data>
+  <data name="Auth_AccessDeniedLandlordsOnly" xml:space="preserve">
+    <value>Access denied. This platform is exclusively for landlords.</value>
+  </data>
+  <data name="Profile_NotFound" xml:space="preserve">
+    <value>No profile found.</value>
+  </data>
+  <data name="Profile_LandlordNotFound" xml:space="preserve">
+    <value>Landlord profile not found.</value>
+  </data>
+  <data name="Profile_TenantNotFound" xml:space="preserve">
+    <value>Tenant profile not found.</value>
+  </data>
+  <data name="Profile_UnknownUserType" xml:space="preserve">
+    <value>Unknown user type.</value>
+  </data>
+  <data name="Device_NotFound" xml:space="preserve">
+    <value>Device not found.</value>
+  </data>
+  <data name="Device_AlreadyRegistered" xml:space="preserve">
+    <value>A device with this serial number is already registered.</value>
+  </data>
+  <data name="Device_MacAlreadyRegistered" xml:space="preserve">
+    <value>A device with this MAC address is already registered.</value>
+  </data>
+  <data name="Device_IdRequired" xml:space="preserve">
+    <value>Device ID is required.</value>
+  </data>
+  <data name="Property_NotFound" xml:space="preserve">
+    <value>Property not found.</value>
+  </data>
+  <data name="Property_TargetNotFound" xml:space="preserve">
+    <value>Target property not found.</value>
+  </data>
+  <data name="Property_NotOwned" xml:space="preserve">
+    <value>Property not found or not owned by the current user.</value>
+  </data>
+  <data name="Subscription_NotFound" xml:space="preserve">
+    <value>No active subscription found.</value>
+  </data>
+  <data name="Subscription_AlreadySubscribed" xml:space="preserve">
+    <value>Already subscribed to this plan.</value>
+  </data>
+  <data name="Subscription_PlanNotFound" xml:space="preserve">
+    <value>Subscription plan not found.</value>
+  </data>
+  <data name="Subscription_CannotCancel" xml:space="preserve">
+    <value>Cannot cancel subscription in status {0}.</value>
+  </data>
+  <data name="Subscription_NotScheduledForCancellation" xml:space="preserve">
+    <value>Subscription is not scheduled for cancellation.</value>
+  </data>
+  <data name="Subscription_CancelledAtPeriodEnd" xml:space="preserve">
+    <value>Subscription will be cancelled at period end.</value>
+  </data>
+  <data name="Subscription_WillContinueRenewing" xml:space="preserve">
+    <value>Subscription will continue renewing.</value>
+  </data>
+  <data name="Subscription_InvalidStatus" xml:space="preserve">
+    <value>Invalid status transition. Valid values: cancelled, active.</value>
+  </data>
+  <data name="Settings_PasswordIncorrect" xml:space="preserve">
+    <value>Current password is incorrect.</value>
+  </data>
+  <data name="Settings_PasswordUpdated" xml:space="preserve">
+    <value>Password updated successfully.</value>
+  </data>
+  <data name="Settings_NotificationsUpdated" xml:space="preserve">
+    <value>Notification preferences updated.</value>
+  </data>
+  <data name="Alert_NotFound" xml:space="preserve">
+    <value>Alert not found.</value>
+  </data>
+  <data name="Ticket_AlreadyExists" xml:space="preserve">
+    <value>A ticket already exists for this alert.</value>
+  </data>
+  <data name="Ticket_NotFound" xml:space="preserve">
+    <value>No ticket exists for this alert. Create one first.</value>
+  </data>
+  <data name="Report_UnsupportedFormat" xml:space="preserve">
+    <value>Unsupported format. Supported formats: pdf, xlsx.</value>
+  </data>
+  <data name="Report_ExcelExclusive" xml:space="preserve">
+    <value>Excel export is exclusive to the Professional plan.</value>
+  </data>
+  <data name="Report_LiveConsumptionExclusive" xml:space="preserve">
+    <value>Live consumption analysis (24h/7d) is exclusive to the Professional plan.</value>
+  </data>
+  <data name="Tenant_PropertyCodeNotFound" xml:space="preserve">
+    <value>Property code not found.</value>
+  </data>
+  <data name="Tenant_NoMatchingRecord" xml:space="preserve">
+    <value>No matching tenant record found.</value>
+  </data>
+  <data name="Stripe_Error" xml:space="preserve">
+    <value>Stripe error: {0}</value>
+  </data>
+  <data name="Internal_ServerError" xml:space="preserve">
+    <value>Internal server error.</value>
+  </data>
+  <data name="Auth_Unauthorized" xml:space="preserve">
+    <value>Authentication required. Please provide a valid token.</value>
+  </data>
+  <data name="Property_NotOwnedOrNotFound" xml:space="preserve">
+    <value>Property not found or not owned by the current user.</value>
+  </data>
+  <data name="Tenant_NotFoundOrNotOwned" xml:space="preserve">
+    <value>Tenant not found or not owned by the current user.</value>
+  </data>
+  <data name="Telemetry_NotFound" xml:space="preserve">
+    <value>No telemetry data found for this device.</value>
+  </data>
+  <data name="PaymentMethod_NotFound" xml:space="preserve">
+    <value>Payment method not found.</value>
+  </data>
+  <data name="Forbidden_LandlordOnly" xml:space="preserve">
+    <value>Access denied. This platform is exclusively for landlords.</value>
+  </data>
+  <data name="Forbidden_TenantOnly" xml:space="preserve">
+    <value>Access denied. This platform is exclusively for tenants.</value>
+  </data>
+  <data name="Report_StartDateAfterEndDate" xml:space="preserve">
+    <value>Start date cannot be greater than end date.</value>
+  </data>
+  <data name="PaymentMethod_IdRequired" xml:space="preserve">
+    <value>PaymentMethodId is required.</value>
+  </data>
+</root>

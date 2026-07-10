@@ -8,6 +8,11 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Localization" Version="8.0.10" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+    <PackageReference Include="Swashbuckle.AspNetCore.Annotations" Version="6.6.2" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Application\Nexora.Contexts.IdentityAccessManagement.Application.csproj" />
     <ProjectReference Include="..\..\..\shared\Nexora.Shared.Infrastructure\Nexora.Shared.Infrastructure.csproj" />
   </ItemGroup>

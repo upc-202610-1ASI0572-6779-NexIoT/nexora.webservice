@@ -34,8 +34,4 @@ namespace Nexora.Application.Dto
         long UserableId
     );
 
-    public record ErrorResponseDto(
-        string Error,
-        string Message
-    );
 }

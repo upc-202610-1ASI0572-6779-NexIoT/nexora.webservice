@@ -1,41 +1,51 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Stripe;
-using System;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Localization;
 using Nexora.Domain.Entities;
 using Nexora.Domain.Enums;
 using Nexora.Domain.Repositories;
 using Nexora.Infrastructure.Persistence;
-using Microsoft.Extensions.Configuration;
+using Nexora.Shared.Domain.Api;
+using Nexora.Shared.Domain.Resources;
+using Swashbuckle.AspNetCore.Annotations;
+using Stripe;
 
 using StripeInvoice = Stripe.Invoice;
-using LocalInvoice = Nexora.Domain.Entities.Invoice;
-using LocalSubscription = Nexora.Domain.Entities.Subscription;
 
 namespace Nexora.WebApi.Controllers
 {
     [ApiController]
-    [Route("api/v1/payments/webhook")]
+        [Route("api/v1/billing-events")]
+        [SwaggerTag("Billing Events")]
     public class WebhooksController : ControllerBase
     {
         private readonly NexoraDbContext _context;
         private readonly IUnitOfWork _unitOfWork;
         private readonly string _webhookSecret;
+        private readonly IStringLocalizer<SharedMessages> _localizer;
 
         public WebhooksController(
             NexoraDbContext context,
             IUnitOfWork unitOfWork,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            IStringLocalizer<SharedMessages> localizer)
         {
             _context = context;
             _unitOfWork = unitOfWork;
             _webhookSecret = configuration["Stripe:WebhookSecret"] ?? "whsec_test";
+            _localizer = localizer;
         }
 
+        /// <summary>
+        /// Handles Stripe webhook events for invoice payment success.
+        /// This endpoint is called by Stripe, not by the mobile/web client.
+        /// </summary>
         [HttpPost]
+        [SwaggerOperation(Summary = "Handle Stripe webhook", Description = "Receives and processes Stripe webhook events. Called by Stripe, not clients.")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> Handle()
         {
             var json = await new StreamReader(HttpContext.Request.Body).ReadToEndAsync();
@@ -49,21 +59,19 @@ namespace Nexora.WebApi.Controllers
                     throwOnApiVersionMismatch: false
                 );
 
-                if (stripeEvent.Type == Stripe.EventTypes.InvoicePaymentSucceeded)
+                if (stripeEvent.Type == EventTypes.InvoicePaymentSucceeded)
                 {
                     var stripeInvoice = stripeEvent.Data.Object as StripeInvoice;
                     var stripeSubscriptionId = stripeInvoice?.Parent?.SubscriptionDetails?.SubscriptionId;
 
                     if (stripeInvoice != null && !string.IsNullOrEmpty(stripeSubscriptionId))
                     {
-                        // Find local subscription
                         var subscription = await _context.Subscriptions
                             .Include(s => s.Invoices)
                             .FirstOrDefaultAsync(s => s.StripeSubscriptionId == stripeSubscriptionId);
 
                         if (subscription != null)
                         {
-                            // Find the latest pending invoice
                             var invoice = subscription.Invoices
                                 .OrderByDescending(i => i.CreatedAt)
                                 .FirstOrDefault();
@@ -78,7 +86,6 @@ namespace Nexora.WebApi.Controllers
 
                                 _context.Payments.Add(payment);
 
-                                // Save actual card details used in Stripe transaction to the local database
                                 var landlordId = subscription.LandlordId;
                                 var card = await _context.SavedCards.FirstOrDefaultAsync(c => c.LandlordId == landlordId);
                                 if (card == null)
@@ -118,7 +125,7 @@ namespace Nexora.WebApi.Controllers
                                         }
                                         catch (Exception)
                                         {
-                                            // Fallback to default Visa 4242
+                                            // Fallback to defaults
                                         }
                                     }
 
@@ -151,11 +158,11 @@ namespace Nexora.WebApi.Controllers
             }
             catch (StripeException ex)
             {
-                return BadRequest(new { message = ex.Message });
+                return BadRequest(new ErrorResponse("BadRequest", string.Format(_localizer["Stripe_Error"], ex.Message)));
             }
             catch (Exception ex)
             {
-                return BadRequest(new { message = ex.Message });
+                return BadRequest(new ErrorResponse("BadRequest", _localizer["Internal_ServerError"]));
             }
         }
     }

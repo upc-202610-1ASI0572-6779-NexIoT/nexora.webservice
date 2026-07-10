@@ -1,18 +1,38 @@
+using System.Globalization;
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Localization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using Nexora.Application.Commands.Telemetry;
+using Nexora.Application.Services;
 using Nexora.Domain.Repositories;
+using Nexora.Domain.Services;
 using Nexora.Infrastructure.Persistence;
 using Nexora.Infrastructure.Repositories;
-using Nexora.Application.Services;
-using Nexora.Application.Commands.Telemetry;
-using Nexora.Domain.Services;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using System.Text;
-using Microsoft.OpenApi.Models;
+using Nexora.Shared.Domain.Api;
+using Nexora.WebApi.Middleware;
 using Stripe;
 
 var builder = WebApplication.CreateBuilder(args);
 StripeConfiguration.ApiKey = builder.Configuration["Stripe:SecretKey"];
+
+// Localization
+builder.Services.AddLocalization(options => options.ResourcesPath = "Resources");
+var supportedCultures = new[] { new CultureInfo("es"), new CultureInfo("en") };
+builder.Services.Configure<RequestLocalizationOptions>(options =>
+{
+    options.DefaultRequestCulture = new RequestCulture("en");
+    options.SupportedCultures = supportedCultures;
+    options.SupportedUICultures = supportedCultures;
+    options.RequestCultureProviders = new[]
+    {
+        new AcceptLanguageHeaderRequestCultureProvider()
+    };
+});
+
 // Add services to the container.
 builder.Services.AddDbContext<NexoraDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -68,7 +88,6 @@ builder.Services.AddScoped<Nexora.Domain.Services.IPropertyCodeGenerator, Nexora
 builder.Services.AddScoped<Nexora.Infrastructure.Services.PropertyCodeBackfillService>();
 builder.Services.AddScoped<Nexora.WebApi.Seeding.DataSeeder>();
 // Use Cases & Processors
-builder.Services.AddScoped<CheckSystemHealthUseCase>();
 builder.Services.AddScoped<ITelemetryProcessor, TelemetryProcessor>();
 builder.Services.AddScoped<IReportService, Nexora.Infrastructure.Services.ReportService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -79,19 +98,50 @@ builder.Services.AddMediatR(cfg =>
         typeof(ProcessTelemetryCommand).Assembly,
         typeof(Nexora.Application.Commands.Property.CreatePropertyCommand).Assembly
     ));
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
 builder.Services.AddControllers()
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        options.InvalidModelStateResponseFactory = context =>
+        {
+            var errors = context.ModelState
+                .Where(e => e.Value?.Errors.Count > 0)
+                .ToDictionary(
+                    e => e.Key,
+                    e => e.Value!.Errors.Select(x => x.ErrorMessage).ToArray()
+                );
+
+            var response = new ValidationErrorResponse(
+                "ValidationFailed",
+                "One or more validation errors occurred.",
+                errors);
+
+            return new BadRequestObjectResult(response);
+        };
+    })
     .AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
     });
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+
+// Swagger/OpenAPI
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "Nexora API", Version = "v1" });
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Nexora API",
+        Version = "v1",
+        Description = "REST API for the Nexora IoT platform. Provides device management, telemetry ingestion, " +
+                      "consumption analytics, subscription billing (Stripe), and alert maintenance workflows.",
+        Contact = new OpenApiContact { Name = "Nexora Team" }
+    });
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
-        Description = "JWT Authorization header using the Bearer scheme. Example: \"Bearer {token}\"",
+        Description = "JWT Authorization header using the Bearer scheme. " +
+                      "Obtain a token via POST /api/v1/auth/login or /api/v1/auth/register/landlords, " +
+                      "then enter: Bearer {token}",
         Name = "Authorization",
         In = ParameterLocation.Header,
         Type = SecuritySchemeType.Http,
@@ -111,7 +161,15 @@ builder.Services.AddSwaggerGen(c =>
             Array.Empty<string>()
         }
     });
+
+    // Include XML comments from all assemblies
+    var xmlFiles = Directory.GetFiles(AppContext.BaseDirectory, "*.xml", SearchOption.TopDirectoryOnly);
+    foreach (var xmlFile in xmlFiles)
+    {
+        c.IncludeXmlComments(xmlFile, includeControllerXmlComments: true);
+    }
 });
+
 var app = builder.Build();
 // Apply migrations and run data seeding
 using (var scope = app.Services.CreateScope())
@@ -153,8 +211,14 @@ using (var scope = app.Services.CreateScope())
     }
 }
 // Configure the HTTP request pipeline.
+app.UseExceptionHandler();
+app.UseRequestLocalization();
 app.UseSwagger();
-app.UseSwaggerUI();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Nexora API v1");
+    c.RoutePrefix = "swagger";
+});
 if (!app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();

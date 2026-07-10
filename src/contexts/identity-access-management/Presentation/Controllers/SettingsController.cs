@@ -1,38 +1,53 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Localization;
 using Nexora.Application.Dto;
 using Nexora.Domain.Entities;
 using Nexora.Domain.Repositories;
 using Nexora.Infrastructure.Persistence;
-using System.Security.Claims;
+using Nexora.Shared.Domain.Api;
+using Nexora.Shared.Domain.Resources;
+using Swashbuckle.AspNetCore.Annotations;
 using DomainUser = Nexora.Domain.Entities.User;
 
 namespace Nexora.WebApi.Controllers
 {
     [ApiController]
-    [Route("api/v1/settings")]
+    [Route("api/v1")]
     [Authorize]
+    [SwaggerTag("User Settings")]
     public class SettingsController : ControllerBase
     {
         private readonly NexoraDbContext _context;
         private readonly ILandlordRepository _landlordRepository;
         private readonly ITenantRepository _tenantRepository;
         private readonly IUserRepository _userRepository;
+        private readonly IStringLocalizer<SharedMessages> _localizer;
 
         public SettingsController(
             NexoraDbContext context,
             ILandlordRepository landlordRepository,
             ITenantRepository tenantRepository,
-            IUserRepository userRepository)
+            IUserRepository userRepository,
+            IStringLocalizer<SharedMessages> localizer)
         {
             _context = context;
             _landlordRepository = landlordRepository;
             _tenantRepository = tenantRepository;
             _userRepository = userRepository;
+            _localizer = localizer;
         }
 
-        [HttpGet]
+        /// <summary>
+        /// Returns the user's complete settings: available languages, notification preferences,
+        /// account info, and security settings.
+        /// </summary>
+        [HttpGet("settings")]
+        [SwaggerOperation(Summary = "Get settings", Description = "Returns complete settings: languages, notification preferences, account info, and security settings.")]
+        [ProducesResponseType(typeof(SystemSettingsResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<IActionResult> GetSettings()
         {
             var userId = GetUserId();
@@ -41,7 +56,7 @@ namespace Nexora.WebApi.Controllers
             var user = await _userRepository.GetByIdAsync(userId.Value);
             if (user == null) return Unauthorized();
 
-            var userableType = User.FindFirstValue("userable_type");
+            var userableType = User.FindFirst("userable_type")?.Value;
             string firstName = "", lastName = "", country = "", city = "";
             string? phoneNumber = null;
 
@@ -59,7 +74,7 @@ namespace Nexora.WebApi.Controllers
             }
             else if (userableType == "Tenant")
             {
-                var userableIdStr = User.FindFirstValue("userable_id");
+                var userableIdStr = User.FindFirst("userable_id")?.Value;
                 if (long.TryParse(userableIdStr, out var tenantId))
                 {
                     var tenant = await _tenantRepository.GetByIdAsync(tenantId);
@@ -103,7 +118,13 @@ namespace Nexora.WebApi.Controllers
             ));
         }
 
-        [HttpPut("notifications")]
+        /// <summary>
+        /// Updates the user's notification preferences (email and SMS alerts).
+        /// </summary>
+        [HttpPatch("notification-preferences")]
+        [SwaggerOperation(Summary = "Update notification preferences", Description = "Sets email and SMS alert preferences for the authenticated user.")]
+        [ProducesResponseType(typeof(MessageResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<IActionResult> UpdateNotifications([FromBody] UpdateNotificationRequest request)
         {
             var userId = GetUserId();
@@ -123,10 +144,17 @@ namespace Nexora.WebApi.Controllers
             }
 
             await _context.SaveChangesAsync();
-            return Ok(new { message = "Notification preferences updated." });
+            return Ok(new MessageResponse(_localizer["Settings_NotificationsUpdated"]));
         }
 
-        [HttpPut("security/passwords")]
+        /// <summary>
+        /// Changes the user's password. Requires the current password for verification.
+        /// </summary>
+        [HttpPut("password")]
+        [SwaggerOperation(Summary = "Change password", Description = "Updates the authenticated user's password after verifying the current password.")]
+        [ProducesResponseType(typeof(MessageResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<IActionResult> UpdatePassword([FromBody] UpdatePasswordRequest request)
         {
             var userId = GetUserId();
@@ -136,21 +164,19 @@ namespace Nexora.WebApi.Controllers
             if (user == null) return Unauthorized();
 
             if (!BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.PasswordHash))
-                return BadRequest(new { message = "Current password is incorrect." });
+                return BadRequest(new ErrorResponse("BadRequest", _localizer["Settings_PasswordIncorrect"]));
 
             var newHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
             user.UpdatePassword(newHash);
             await _userRepository.UpdateAsync(user);
             await _context.SaveChangesAsync();
 
-            return Ok(new { message = "Password updated successfully." });
+            return Ok(new MessageResponse(_localizer["Settings_PasswordUpdated"]));
         }
 
         private long? GetUserId()
         {
-            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!long.TryParse(userIdString, out var userId)) return null;
-            return userId;
+            return User.GetUserId();
         }
     }
 }
